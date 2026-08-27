@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EasyInput",
+  "version": "0.1.29",
+  "identifier": "pro.easyinput.desktop.intel",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [{
+      "title": "EasyInput",
+      "width": 1200,
+      "height": 800,
+      "minWidth": 1024,
+      "minHeight": 720,
+      "center": true,
+      "resizable": true,
+      "fullscreen": false,
+      "titleBarStyle": "Visible",
+      "hiddenTitle": true
+    }],
+    "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://easyinput.pro wss://easyinput.pro wss://openspeech.bytedance.com https://docs.volcengine.com; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'" }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app"],
+    "category": "Productivity",
+    "shortDescription": "AI 语音输入与 EasyInput AI 键盘管理",
+    "longDescription": "EasyInput Intel Mac 桌面端",
+    "copyright": "Copyright © 2026 EasyInput",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist",
+      "signingIdentity": null
+    }
+  }
+}

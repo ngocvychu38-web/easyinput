@@ -1,0 +1,34 @@
+{
+  "name": "easyinput-intel-mac",
+  "private": true,
+  "version": "0.1.29",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tauri": "tauri",
+    "tauri:dev": "bash scripts/dev.sh",
+    "tauri:build:debug:app": "tauri build --debug --bundles app && bash scripts/sign-local-app.sh",
+    "tauri:build:intel": "tauri build --target x86_64-apple-darwin",
+    "verify:intel": "bash scripts/verify-intel.sh"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "2.7.2",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^4.1.11"
+  }
+}

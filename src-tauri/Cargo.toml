@@ -1,0 +1,35 @@
+[package]
+name = "easyinput"
+version = "0.1.29"
+description = "EasyInput Intel Mac desktop client"
+authors = ["EasyInput"]
+edition = "2021"
+
+[lib]
+name = "easyinput_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+thiserror = "2"
+sha2 = "0.10"
+security-framework = "3"
+url = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+futures-util = "0.3"
+flate2 = "1"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+hidapi = { version = "2.6", default-features = false, features = ["macos-shared-device"] }

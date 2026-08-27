@@ -1,0 +1,64 @@
+.select-wrap select {
+  padding-right: 34px;
+  text-overflow: ellipsis;
+}
+
+.app-picker {
+  margin-top: 17px;
+  padding-top: 1px;
+  border-top: 1px solid var(--line);
+}
+
+.app-picker-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.app-picker-actions .button {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.app-picker-actions > button:not(.button) {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 3px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.app-picker-actions > button:disabled { opacity: .5; }
+
+.selected-app-path,
+.app-picker-hint {
+  margin: 11px 0 0 !important;
+  font-size: 9px !important;
+  color: #8c857d !important;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.selected-app-path svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.selected-app-path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-picker .form-error {
+  font-size: 10px !important;
+  margin: 9px 0 0;
+}
