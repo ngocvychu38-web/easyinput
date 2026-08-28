@@ -30,6 +30,10 @@ pub struct HardwareVoiceButtonEvent {
 #[serde(rename_all = "camelCase")]
 pub struct HardwareEditButtonEvent { pub pressed: bool, pub sequence: u64, pub has_selection: bool }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardwareRealtimeButtonEvent { pub pressed: bool, pub sequence: u64 }
+
 pub(crate) struct DeviceEventHub {
     config_ack: Mutex<Option<ConfigAck>>,
     config_ack_changed: Condvar,
@@ -87,6 +91,8 @@ pub fn start_voice_button_listener(app: tauri::AppHandle, hub: Arc<DeviceEventHu
         let mut voice_sequence = 0_u64;
         let mut last_edit_state = None;
         let mut edit_sequence = 0_u64;
+        let mut last_realtime_state = None;
+        let mut realtime_sequence = 0_u64;
         let mut last_app_report: Option<(Vec<u8>, std::time::Instant)> = None;
         let mut fixed_text: Option<(u8, u8, Vec<u8>)> = None;
         loop {
@@ -156,6 +162,13 @@ pub fn start_voice_button_listener(app: tauri::AppHandle, hub: Arc<DeviceEventHu
                                     } else { false };
                                     edit_sequence = edit_sequence.wrapping_add(1);
                                     let _ = app.emit("hardware-edit-button", HardwareEditButtonEvent { pressed, sequence: edit_sequence, has_selection });
+                                }
+                            }
+                            AppCommand::Hotkey { pressed, hotkey } if hotkey.eq_ignore_ascii_case("EasyInputRealtime") => {
+                                if last_realtime_state != Some(pressed) {
+                                    last_realtime_state = Some(pressed);
+                                    realtime_sequence = realtime_sequence.wrapping_add(1);
+                                    let _ = app.emit("hardware-realtime-button", HardwareRealtimeButtonEvent { pressed, sequence: realtime_sequence });
                                 }
                             }
                             AppCommand::Hotkey { .. } | AppCommand::Other(_) => {}

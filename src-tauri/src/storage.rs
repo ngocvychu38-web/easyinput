@@ -1,14 +1,14 @@
-use crate::model::{ActivityDay, AppSettings, ArkModelConfig, DoubaoSpeechConfig, HistoryEntry, KeyboardConfig};
+use crate::model::{ActivityDay, AppSettings, ArkModelConfig, DoubaoSpeechConfig, HistoryEntry, KeyboardConfig, RealtimeVoiceConfig};
 use crate::dictionary::DictionaryData;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::{Path, PathBuf}, sync::Mutex};
 
-const CONFIG_VERSION: u32 = 3;
+const CONFIG_VERSION: u32 = 4;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all="camelCase")]
-pub struct PersistedConfig { pub version: u32, pub revision: u64, pub settings: AppSettings, pub keyboard: KeyboardConfig, #[serde(default)] pub speech: DoubaoSpeechConfig, #[serde(default)] pub ark: ArkModelConfig }
-impl Default for PersistedConfig { fn default()->Self { Self{version:CONFIG_VERSION,revision:1,settings:AppSettings::default(),keyboard:KeyboardConfig::default(),speech:DoubaoSpeechConfig::default(),ark:ArkModelConfig::default()} } }
+pub struct PersistedConfig { pub version: u32, pub revision: u64, pub settings: AppSettings, pub keyboard: KeyboardConfig, #[serde(default)] pub speech: DoubaoSpeechConfig, #[serde(default)] pub ark: ArkModelConfig, #[serde(default)] pub realtime_voice: RealtimeVoiceConfig }
+impl Default for PersistedConfig { fn default()->Self { Self{version:CONFIG_VERSION,revision:1,settings:AppSettings::default(),keyboard:KeyboardConfig::default(),speech:DoubaoSpeechConfig::default(),ark:ArkModelConfig::default(),realtime_voice:RealtimeVoiceConfig::default()} } }
 
 pub struct Storage { root: PathBuf, conn: Mutex<Connection> }
 impl Storage {
@@ -33,7 +33,7 @@ impl Storage {
             };
             cfg.version=2;cfg.revision+=1;
         }
-        if cfg.version<3{cfg.version=3;cfg.revision+=1;self.write_config(&cfg)?;}
+        if cfg.version<4{cfg.version=4;cfg.revision+=1;self.write_config(&cfg)?;}
         Ok(cfg)
     }
     pub fn write_config(&self,cfg:&PersistedConfig)->Result<(),String>{
@@ -58,4 +58,4 @@ impl Storage {
 pub fn set_secret(account:&str,value:&str)->Result<(),String>{let password=security_framework::passwords::set_generic_password("pro.easyinput.desktop.intel",account,value.as_bytes());password.map_err(|e|e.to_string())}
 pub fn get_secret(account:&str)->Result<Option<String>,String>{match security_framework::passwords::get_generic_password("pro.easyinput.desktop.intel",account){Ok(bytes)=>String::from_utf8(bytes).map(Some).map_err(|e|e.to_string()),Err(_)=>Ok(None)}}
 
-#[cfg(test)] mod tests { use super::*; #[test] fn config_roundtrip(){let dir=std::env::temp_dir().join(format!("easyinput-test-{}",uuid::Uuid::new_v4()));let store=Storage::open(dir.clone()).unwrap();let cfg=store.read_config().unwrap();assert_eq!(cfg.version,3);store.write_config(&cfg).unwrap();let _=fs::remove_dir_all(dir);} #[test] fn migrates_legacy_doubao_2_resource(){let dir=std::env::temp_dir().join(format!("easyinput-test-{}",uuid::Uuid::new_v4()));let store=Storage::open(dir.clone()).unwrap();let mut cfg=PersistedConfig::default();cfg.version=1;cfg.speech.resource_id="volc.seedasr.sauc.duration".into();store.write_config(&cfg).unwrap();let migrated=store.read_config().unwrap();assert_eq!(migrated.version,3);assert_eq!(migrated.speech.resource_id,"volc.bigasr.sauc.duration");assert_eq!(migrated.ark.model,"doubao-seed-2-0-lite-260215");let _=fs::remove_dir_all(dir);} #[test] fn history_roundtrip(){let dir=std::env::temp_dir().join(format!("easyinput-test-{}",uuid::Uuid::new_v4()));let store=Storage::open(dir.clone()).unwrap();let id=store.add_history("你好 EasyInput",1000,"Computer").unwrap();assert_eq!(store.history_page(None,10).unwrap()[0].id,id);store.delete_history(id).unwrap();let _=fs::remove_dir_all(dir);} }
+#[cfg(test)] mod tests { use super::*; #[test] fn config_roundtrip(){let dir=std::env::temp_dir().join(format!("easyinput-test-{}",uuid::Uuid::new_v4()));let store=Storage::open(dir.clone()).unwrap();let cfg=store.read_config().unwrap();assert_eq!(cfg.version,4);store.write_config(&cfg).unwrap();let _=fs::remove_dir_all(dir);} #[test] fn migrates_legacy_doubao_2_resource(){let dir=std::env::temp_dir().join(format!("easyinput-test-{}",uuid::Uuid::new_v4()));let store=Storage::open(dir.clone()).unwrap();let mut cfg=PersistedConfig::default();cfg.version=1;cfg.speech.resource_id="volc.seedasr.sauc.duration".into();store.write_config(&cfg).unwrap();let migrated=store.read_config().unwrap();assert_eq!(migrated.version,4);assert_eq!(migrated.speech.resource_id,"volc.bigasr.sauc.duration");assert_eq!(migrated.ark.model,"doubao-seed-2-0-lite-260215");assert_eq!(migrated.realtime_voice.model,"1.2.6.1");let _=fs::remove_dir_all(dir);} #[test] fn history_roundtrip(){let dir=std::env::temp_dir().join(format!("easyinput-test-{}",uuid::Uuid::new_v4()));let store=Storage::open(dir.clone()).unwrap();let id=store.add_history("你好 EasyInput",1000,"Computer").unwrap();assert_eq!(store.history_page(None,10).unwrap()[0].id,id);store.delete_history(id).unwrap();let _=fs::remove_dir_all(dir);} }

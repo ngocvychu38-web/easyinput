@@ -24,7 +24,7 @@ pub struct DeviceCapabilities { pub config: bool, pub microphone: bool, pub spea
 pub struct AudioStreamDiagnostics { pub packets: u64, pub bytes: u64, pub sequence_gaps: u64, pub out_of_order: u64, pub rms: f32, pub peak: f32, pub last_heartbeat_at: Option<String>, pub last_error: Option<String> }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum KeyboardActionKind { VoicePtt, EditPtt, Enter, Backspace, Cut, SelectAll, Copy, Paste, Undo, Hotkey, FixedText, OpenApp, ScrollAxisToggle, CaretSelect, Disabled, HostAction }
+pub enum KeyboardActionKind { VoicePtt, EditPtt, RealtimeVoice, Enter, Backspace, Cut, SelectAll, Copy, Paste, Undo, Hotkey, FixedText, OpenApp, ScrollAxisToggle, CaretSelect, Disabled, HostAction }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +66,67 @@ impl Default for ArkModelConfig { fn default()->Self { Self { enabled:false,endp
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RealtimeVoiceConfig {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub model: String,
+    pub instructions: String,
+    pub voice: String,
+    pub speed: i32,
+    pub loudness: i32,
+    pub strict_audit: bool,
+    pub enable_loudness_norm: bool,
+    pub enable_user_query_exit: bool,
+    pub greeting: String,
+    #[serde(default)]
+    pub api_key_saved: bool,
+}
+
+impl Default for RealtimeVoiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue".into(),
+            model: "1.2.6.1".into(),
+            instructions: "你是一个友好、简洁的中文语音助手。优先直接回答用户问题。".into(),
+            voice: "zh_male_xiaotian_jupiter_bigtts".into(),
+            speed: 0,
+            loudness: 0,
+            strict_audit: true,
+            enable_loudness_norm: true,
+            enable_user_query_exit: false,
+            greeting: String::new(),
+            api_key_saved: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum RealtimeCallPhase { Idle, Connecting, Listening, Speaking, Closing, Error }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeCallState {
+    pub phase: RealtimeCallPhase,
+    pub session_id: Option<String>,
+    pub user_text: String,
+    pub assistant_text: String,
+    pub elapsed_ms: u64,
+    pub input_packets: u64,
+    pub output_packets: u64,
+    pub error: Option<String>,
+    pub log_id: Option<String>,
+}
+
+impl Default for RealtimeCallState {
+    fn default() -> Self {
+        Self { phase: RealtimeCallPhase::Idle, session_id: None, user_text: String::new(), assistant_text: String::new(), elapsed_ms: 0, input_packets: 0, output_packets: 0, error: None, log_id: None }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot { pub version: String, pub voice_service: VoiceServiceState, pub recording: RecordingState, pub device: DeviceConnectionState, pub capabilities: DeviceCapabilities, pub diagnostics: AudioStreamDiagnostics, pub settings: AppSettings, pub keyboard_config: KeyboardConfig, pub today_chars: u64, pub today_duration_ms: u64 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,4 +146,4 @@ impl<T: Serialize> OperationResult<T> {
 }
 
 impl Default for AppSettings { fn default() -> Self { Self { revision: 1, input_hotkey:"RightCommand".into(), edit_hotkey:"RightOption".into(), trigger_mode:"Hold".into(), cleanup_mode:"Original".into(), custom_cleanup:String::new(), input_mode:"Auto".into(), enter_to_stop:true, overlay_enabled:true, live_preview:true, overlay_position:"Bottom".into(), overlay_opacity:0.7, appearance:"System".into(), microphone_source:"KeyboardPreferred".into() } } }
-impl Default for KeyboardConfig { fn default() -> Self { let make=|kind: KeyboardActionKind,label: &str|KeyboardAction{kind,label:label.into(),value:None,host_action_id:None}; Self { revision:1,target_platform:"MacOS".into(),ptt_hotkey:"RightMeta".into(),edit_ptt_hotkey:"RightOption".into(),ptt_mode:"Hold".into(),keys:vec![make(KeyboardActionKind::VoicePtt,"语音输入"),make(KeyboardActionKind::EditPtt,"语音编辑"),make(KeyboardActionKind::Copy,"复制"),make(KeyboardActionKind::Paste,"粘贴"),make(KeyboardActionKind::Undo,"撤销"),make(KeyboardActionKind::SelectAll,"全选"),make(KeyboardActionKind::HostAction,"打开历史"),make(KeyboardActionKind::Disabled,"禁用")],encoder:EncoderConfig{press:make(KeyboardActionKind::ScrollAxisToggle,"切换滚动方向"),axis:"Vertical".into(),speed:3,reverse:false},wifi:WifiConfig{ssid:String::new(),password_saved:false,audio_host:String::new(),audio_port:17333} } } }
+impl Default for KeyboardConfig { fn default() -> Self { let make=|kind: KeyboardActionKind,label: &str|KeyboardAction{kind,label:label.into(),value:None,host_action_id:None}; Self { revision:1,target_platform:"MacOS".into(),ptt_hotkey:"RightMeta".into(),edit_ptt_hotkey:"RightOption".into(),ptt_mode:"Hold".into(),keys:vec![make(KeyboardActionKind::VoicePtt,"语音输入"),make(KeyboardActionKind::EditPtt,"语音编辑"),make(KeyboardActionKind::RealtimeVoice,"实时通话"),make(KeyboardActionKind::Copy,"复制"),make(KeyboardActionKind::Paste,"粘贴"),make(KeyboardActionKind::Undo,"撤销"),make(KeyboardActionKind::SelectAll,"全选"),make(KeyboardActionKind::HostAction,"打开历史")],encoder:EncoderConfig{press:make(KeyboardActionKind::ScrollAxisToggle,"切换滚动方向"),axis:"Vertical".into(),speed:3,reverse:false},wifi:WifiConfig{ssid:String::new(),password_saved:false,audio_host:String::new(),audio_port:17333} } } }

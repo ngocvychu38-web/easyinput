@@ -6,18 +6,20 @@ mod firmware_config;
 mod input;
 mod model;
 mod protocol;
+mod realtime;
 mod storage;
 mod speech;
+mod wifi;
 
 use device::DeviceManager;
 use model::*;
 use std::{collections::HashMap, sync::Mutex};
 use storage::Storage;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-pub struct AppState { storage: Storage, recording: Mutex<RecordingState>, speech_sessions:Mutex<HashMap<String,tokio::sync::mpsc::UnboundedSender<speech::StreamCommand>>>, speech_token:Mutex<Option<String>>, ark_api_key:Mutex<Option<String>>, edit_context:Mutex<Option<String>>, device: DeviceManager }
-impl AppState { fn new(storage:Storage)->Self{Self{storage,recording:Mutex::new(RecordingState{phase:RecordingPhase::Idle,session_id:None,elapsed_ms:0,partial_text:String::new(),error:None}),speech_sessions:Mutex::new(HashMap::new()),speech_token:Mutex::new(None),ark_api_key:Mutex::new(None),edit_context:Mutex::new(None),device:DeviceManager::new()}} }
+pub struct AppState { storage: Storage, recording: Mutex<RecordingState>, speech_sessions:Mutex<HashMap<String,tokio::sync::mpsc::UnboundedSender<speech::StreamCommand>>>, speech_token:Mutex<Option<String>>, ark_api_key:Mutex<Option<String>>, realtime_api_key:Mutex<Option<String>>, realtime_call:Mutex<RealtimeCallState>, realtime_session:Mutex<Option<tokio::sync::mpsc::UnboundedSender<realtime::RealtimeCommand>>>, edit_context:Mutex<Option<String>>, device: DeviceManager }
+impl AppState { fn new(storage:Storage)->Self{Self{storage,recording:Mutex::new(RecordingState{phase:RecordingPhase::Idle,session_id:None,elapsed_ms:0,partial_text:String::new(),error:None}),speech_sessions:Mutex::new(HashMap::new()),speech_token:Mutex::new(None),ark_api_key:Mutex::new(None),realtime_api_key:Mutex::new(None),realtime_call:Mutex::new(RealtimeCallState::default()),realtime_session:Mutex::new(None),edit_context:Mutex::new(None),device:DeviceManager::new()}} }
 
 pub(crate) fn set_edit_context(app:&tauri::AppHandle,selection:Option<String>){let state=app.state::<AppState>();if let Ok(mut context)=state.edit_context.lock(){*context=selection;};}
 
@@ -38,6 +40,12 @@ fn update_app_settings(state:tauri::State<AppState>,mut settings:AppSettings)->O
 
 #[tauri::command]
 fn list_installed_applications()->Result<Vec<app_catalog::InstalledApplication>,String>{app_catalog::list_installed_applications()}
+
+#[tauri::command]
+async fn list_available_wifi_networks(state:tauri::State<'_,AppState>)->Result<wifi::WifiScanResult,String>{
+ let configured=state.storage.read_config()?.keyboard.wifi.ssid;
+ tokio::task::spawn_blocking(move||wifi::scan(&configured)).await.map_err(|error|format!("Wi-Fi 扫描任务失败：{error}"))?
+}
 
 #[derive(serde::Serialize)]#[serde(rename_all="camelCase")]struct SessionStart{session_id:String}
 #[tauri::command]
@@ -104,11 +112,19 @@ fn get_ai_keyboard_connection_state(state:tauri::State<AppState>)->OperationResu
 #[tauri::command]
 fn read_ai_keyboard_status(state:tauri::State<AppState>)->OperationResult<DeviceCapabilities>{match state.device.discover(){Ok((_,c))=>OperationResult::success(Some(c)),Err(e)=>OperationResult::failure(e)}}
 #[tauri::command]
-fn push_ai_keyboard_config(state:tauri::State<AppState>,mut config:KeyboardConfig)->OperationResult<()>{
+fn push_ai_keyboard_config(state:tauri::State<AppState>,mut config:KeyboardConfig,wifi_password:Option<String>)->OperationResult<()>{
  for(index,action)in config.keys.iter().enumerate(){if matches!(action.kind,KeyboardActionKind::OpenApp){let Some(path)=action.value.as_deref().filter(|value|!value.trim().is_empty())else{return OperationResult::failure(format!("KEY{} 的“打开应用”动作尚未选择应用",index+1))};if !path.to_lowercase().ends_with(".app"){return OperationResult::failure(format!("KEY{} 选择的目标不是 macOS 应用程序",index+1))}if !std::path::Path::new(path).is_dir(){return OperationResult::failure(format!("KEY{} 选择的应用已不存在，请重新选择",index+1))}}}
  let mut persisted=match state.storage.read_config(){Ok(v)=>v,Err(e)=>return OperationResult::failure(e)};
  config.revision=persisted.keyboard.revision+1;
- let(config,bytes)=match firmware_config::prepare(config){Ok(value)=>value,Err(error)=>return OperationResult::failure(error)};
+ let supplied_password=wifi_password.filter(|value|!value.is_empty());
+ let resolved_password=if let Some(password)=supplied_password{
+  if config.wifi.ssid.trim().is_empty(){return OperationResult::failure("请先选择或输入 Wi-Fi 名称")}
+  if let Err(error)=storage::set_secret(wifi::PASSWORD_ACCOUNT,&password){return OperationResult::failure(format!("无法将 Wi-Fi 密码写入 macOS 钥匙串：{error}"))}
+  config.wifi.password_saved=true;Some(password)
+ }else if config.wifi.password_saved{
+  match storage::get_secret(wifi::PASSWORD_ACCOUNT){Ok(Some(password))=>Some(password),Ok(None)=>return OperationResult::failure("本机没有找到已保存的 Wi-Fi 密码，请重新输入"),Err(error)=>return OperationResult::failure(format!("无法读取已保存的 Wi-Fi 密码：{error}"))}
+ }else{None};
+ let(config,bytes)=match firmware_config::prepare(config,resolved_password.as_deref()){Ok(value)=>value,Err(error)=>return OperationResult::failure(error)};
  persisted.revision+=1;persisted.keyboard=config;
  if let Err(e)=state.storage.write_config(&persisted){return OperationResult::failure(e)};
  match state.device.push_config(&bytes){Ok(_)=>OperationResult::success(None),Err(e)=>OperationResult::failure(format!("配置已保存在本机，但未同步到设备：{e}"))}}
@@ -211,6 +227,76 @@ async fn test_ark_connection(state:tauri::State<'_,AppState>,config:ArkModelConf
  Ok(ark::test_connection(&config,&key).await)
 }
 
+async fn read_realtime_api_key(state:&AppState)->Result<String,String>{
+ if let Ok(cache)=state.realtime_api_key.lock(){if let Some(value)=cache.as_ref(){return Ok(value.clone())}}
+ let value=match tokio::time::timeout(std::time::Duration::from_secs(30),tokio::task::spawn_blocking(||storage::get_secret(realtime::API_KEY_ACCOUNT))).await{
+  Ok(Ok(Ok(Some(value))))=>Ok(value),
+  Ok(Ok(Ok(None)))=>Err("请先在语音服务配置中填写并保存实时语音 API Key".into()),
+  Ok(Ok(Err(error)))=>Err(format!("无法读取实时语音 API Key：{error}")),
+  Ok(Err(error))=>Err(format!("读取实时语音 API Key 任务失败：{error}")),
+  Err(_)=>Err("读取实时语音 API Key 超时（30 秒）".into())
+ }?;
+ if let Ok(mut cache)=state.realtime_api_key.lock(){*cache=Some(value.clone())}Ok(value)
+}
+
+#[tauri::command]
+fn get_realtime_voice_config(state:tauri::State<AppState>)->Result<RealtimeVoiceConfig,String>{Ok(state.storage.read_config()?.realtime_voice)}
+
+#[tauri::command]
+fn save_realtime_voice_config(state:tauri::State<AppState>,mut config:RealtimeVoiceConfig,api_key:Option<String>)->OperationResult<RealtimeVoiceConfig>{
+ if let Err(error)=realtime::validate(&config){return OperationResult::failure(error)}
+ let mut persisted=match state.storage.read_config(){Ok(value)=>value,Err(error)=>return OperationResult::failure(error)};
+ let mut saved=persisted.realtime_voice.api_key_saved;
+ if let Some(value)=api_key.filter(|value|!value.trim().is_empty()){
+  let value=value.trim().to_owned();if let Err(error)=storage::set_secret(realtime::API_KEY_ACCOUNT,&value){return OperationResult::failure(format!("无法写入 macOS 钥匙串：{error}"))}
+  saved=true;if let Ok(mut cache)=state.realtime_api_key.lock(){*cache=Some(value)}
+ }
+ if config.enabled&&!saved{return OperationResult::failure("启用实时语音前必须保存 API Key")}
+ config.api_key_saved=saved;persisted.revision+=1;persisted.realtime_voice=config.clone();match state.storage.write_config(&persisted){Ok(_)=>OperationResult::success(Some(config)),Err(error)=>OperationResult::failure(error)}
+}
+
+#[tauri::command]
+async fn test_realtime_voice_connection(state:tauri::State<'_,AppState>,config:RealtimeVoiceConfig,api_key:Option<String>)->Result<OperationResult<realtime::ConnectionTest>,String>{
+ let key=match api_key.filter(|value|!value.trim().is_empty()){Some(value)=>value,None=>match read_realtime_api_key(state.inner()).await{Ok(value)=>value,Err(error)=>return Ok(OperationResult::failure(error))}};
+ Ok(realtime::test_connection(&config,&key).await)
+}
+
+#[tauri::command]
+fn get_realtime_call_state(state:tauri::State<AppState>)->Result<RealtimeCallState,String>{state.realtime_call.lock().map(|value|value.clone()).map_err(|_|"实时通话状态锁已损坏".into())}
+
+#[derive(serde::Serialize)]#[serde(rename_all="camelCase")]struct RealtimeSessionStart{session_id:String}
+
+#[tauri::command]
+async fn start_realtime_call(app:tauri::AppHandle,state:tauri::State<'_,AppState>)->Result<OperationResult<RealtimeSessionStart>,String>{
+ let persisted=state.storage.read_config()?;
+ if !persisted.realtime_voice.enabled{return Ok(OperationResult::failure("请先在语音服务配置中启用豆包实时语音"))}
+ if !persisted.realtime_voice.api_key_saved{return Ok(OperationResult::failure("请先保存豆包实时语音 API Key"))}
+ if persisted.keyboard.wifi.audio_port==0{return Ok(OperationResult::failure("开发板音频端口不能为 0"))}
+ if state.realtime_session.lock().map_err(|_|"实时通话会话锁已损坏")?.is_some(){return Ok(OperationResult::failure("实时通话已经在运行"))}
+ let session_id=uuid::Uuid::new_v4().to_string();
+ if let Ok(mut call)=state.realtime_call.lock(){*call=RealtimeCallState{phase:RealtimeCallPhase::Connecting,session_id:Some(session_id.clone()),user_text:String::new(),assistant_text:String::new(),elapsed_ms:0,input_packets:0,output_packets:0,error:None,log_id:None};let _=app.emit("realtime-call-state",call.clone());}
+ let key=match read_realtime_api_key(state.inner()).await{Ok(value)=>value,Err(error)=>{if let Ok(mut call)=state.realtime_call.lock(){call.phase=RealtimeCallPhase::Error;call.error=Some(error.clone());}return Ok(OperationResult::failure(error))}};
+ let sender=match realtime::open_session(app.clone(),session_id.clone(),persisted.realtime_voice,key,persisted.keyboard.wifi.audio_port).await{Ok(value)=>value,Err(error)=>{if let Ok(mut call)=state.realtime_call.lock(){call.phase=RealtimeCallPhase::Error;call.session_id=None;call.error=Some(error.clone());let _=app.emit("realtime-call-state",call.clone());}return Ok(OperationResult::failure(error))}};
+ *state.realtime_session.lock().map_err(|_|"实时通话会话锁已损坏")?=Some(sender);
+ Ok(OperationResult::success(Some(RealtimeSessionStart{session_id})))
+}
+
+#[tauri::command]
+fn stop_realtime_call(state:tauri::State<AppState>)->OperationResult<()>{
+ match state.realtime_session.lock().ok().and_then(|value|value.as_ref().cloned()){
+  Some(sender)=>match sender.send(realtime::RealtimeCommand::Stop){Ok(_)=>OperationResult::success(None),Err(_)=>OperationResult::failure("实时通话会话已经结束")},
+  None=>OperationResult::failure("当前没有正在进行的实时通话")
+ }
+}
+
+#[tauri::command]
+fn interrupt_realtime_call(state:tauri::State<AppState>)->OperationResult<()>{
+ match state.realtime_session.lock().ok().and_then(|value|value.as_ref().cloned()){
+  Some(sender)=>match sender.send(realtime::RealtimeCommand::Interrupt){Ok(_)=>OperationResult::success(None),Err(_)=>OperationResult::failure("实时通话会话已经结束")},
+  None=>OperationResult::failure("当前没有正在进行的实时通话")
+ }
+}
+
 #[tauri::command]
 async fn test_doubao_connection(state:tauri::State<'_,AppState>,config:DoubaoSpeechConfig,access_token:Option<String>)->Result<OperationResult<speech::ConnectionTest>,String>{
  let token=match access_token.filter(|v|!v.trim().is_empty()){
@@ -220,4 +306,4 @@ async fn test_doubao_connection(state:tauri::State<'_,AppState>,config:DoubaoSpe
  Ok(speech::test_connection(&config,&token).await)
 }
 
-pub fn run(){let _=rustls::crypto::ring::default_provider().install_default();tauri::Builder::default().plugin(tauri_plugin_dialog::init()).setup(|app|{let root=app.path().app_data_dir().map_err(|e|e.to_string())?;let storage=Storage::open(root).map_err(|e|e.to_string())?;let state=AppState::new(storage);let device_events=state.device.event_hub();app.manage(state);device::start_voice_button_listener(app.handle().clone(),device_events);let icon=app.default_window_icon().cloned().ok_or("应用图标不可用")?;TrayIconBuilder::new().icon(icon).tooltip("EasyInput").on_tray_icon_event(|tray,event|{if matches!(event,TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}){if let Some(window)=tray.app_handle().get_webview_window("main"){let _=window.show();let _=window.set_focus();}}}).build(app)?;Ok(())}).on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=window.hide();}}).invoke_handler(tauri::generate_handler![get_runtime_snapshot,update_app_settings,list_installed_applications,start_recording,push_recording_audio,stop_recording,get_history_page,get_activity_calendar,delete_history,get_dictionary,save_dictionary,import_dictionary_file,export_dictionary_file,login,logout,get_ai_keyboard_connection_state,read_ai_keyboard_status,push_ai_keyboard_config,sync_ai_keyboard_boot_sound,open_bluetooth_settings,open_input_monitoring_settings,check_app_update,install_app_update,get_doubao_speech_config,save_doubao_speech_config,test_doubao_connection,get_ark_model_config,save_ark_model_config,test_ark_connection]).run(tauri::generate_context!()).expect("EasyInput 启动失败")}
+pub fn run(){let _=rustls::crypto::ring::default_provider().install_default();tauri::Builder::default().plugin(tauri_plugin_dialog::init()).setup(|app|{let root=app.path().app_data_dir().map_err(|e|e.to_string())?;let storage=Storage::open(root).map_err(|e|e.to_string())?;let state=AppState::new(storage);let device_events=state.device.event_hub();app.manage(state);device::start_voice_button_listener(app.handle().clone(),device_events);let icon=app.default_window_icon().cloned().ok_or("应用图标不可用")?;TrayIconBuilder::new().icon(icon).tooltip("EasyInput").on_tray_icon_event(|tray,event|{if matches!(event,TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}){if let Some(window)=tray.app_handle().get_webview_window("main"){let _=window.show();let _=window.set_focus();}}}).build(app)?;Ok(())}).on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=window.hide();}}).invoke_handler(tauri::generate_handler![get_runtime_snapshot,update_app_settings,list_installed_applications,list_available_wifi_networks,start_recording,push_recording_audio,stop_recording,get_history_page,get_activity_calendar,delete_history,get_dictionary,save_dictionary,import_dictionary_file,export_dictionary_file,login,logout,get_ai_keyboard_connection_state,read_ai_keyboard_status,push_ai_keyboard_config,sync_ai_keyboard_boot_sound,open_bluetooth_settings,open_input_monitoring_settings,check_app_update,install_app_update,get_doubao_speech_config,save_doubao_speech_config,test_doubao_connection,get_ark_model_config,save_ark_model_config,test_ark_connection,get_realtime_voice_config,save_realtime_voice_config,test_realtime_voice_connection,get_realtime_call_state,start_realtime_call,stop_realtime_call,interrupt_realtime_call]).run(tauri::generate_context!()).expect("EasyInput 启动失败")}

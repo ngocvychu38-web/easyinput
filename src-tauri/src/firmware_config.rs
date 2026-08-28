@@ -23,6 +23,7 @@ fn action_value(action: &mut KeyboardAction, platform: &str) -> Result<Value, St
     match action.kind {
         KeyboardActionKind::VoicePtt => Ok(json!("voice_ptt_hold")),
         KeyboardActionKind::EditPtt => Ok(json!("edit_ptt_hold")),
+        KeyboardActionKind::RealtimeVoice => Ok(hotkey("EasyInputRealtime")),
         KeyboardActionKind::Enter => Ok(hotkey("Return")),
         KeyboardActionKind::Backspace => Ok(hotkey("Backspace")),
         KeyboardActionKind::Cut => Ok(hotkey(format!("{command_modifier}+X"))),
@@ -71,9 +72,17 @@ fn action_value(action: &mut KeyboardAction, platform: &str) -> Result<Value, St
 
 /// Converts the local/UI model to the firmware-owned ai_keyboard.v1 schema.
 /// App paths remain local; only opaque UUIDs are written to the keyboard.
-pub fn prepare(mut config: KeyboardConfig) -> Result<(KeyboardConfig, Vec<u8>), String> {
+pub fn prepare(mut config: KeyboardConfig, wifi_password: Option<&str>) -> Result<(KeyboardConfig, Vec<u8>), String> {
     if config.keys.len() != 8 {
         return Err(format!("按键配置必须包含 8 个按键，当前为 {} 个", config.keys.len()));
+    }
+    if config.wifi.ssid.as_bytes().len() > 32 {
+        return Err("Wi-Fi 名称超过开发板支持的 32 字节限制".into());
+    }
+    if let Some(password) = wifi_password.filter(|value| !value.is_empty()) {
+        if !(8..=63).contains(&password.as_bytes().len()) {
+            return Err("Wi-Fi 密码必须为 8–63 字节；开放网络请留空".into());
+        }
     }
     let platform = if config.target_platform.eq_ignore_ascii_case("windows") { "windows" } else { "macos" };
     let mut keys = Map::new();
@@ -112,6 +121,9 @@ pub fn prepare(mut config: KeyboardConfig) -> Result<(KeyboardConfig, Vec<u8>), 
     if !config.wifi.ssid.trim().is_empty() {
         payload["wifi_ssid"] = json!(config.wifi.ssid);
     }
+    if let Some(password) = wifi_password.filter(|value| !value.is_empty()) {
+        payload["wifi_password"] = json!(password);
+    }
     if !config.wifi.audio_host.trim().is_empty() {
         payload["audio_host"] = json!(config.wifi.audio_host);
     }
@@ -136,17 +148,29 @@ mod tests {
             value: Some("/Applications/Safari.app".into()),
             host_action_id: None,
         };
-        let (prepared, bytes) = prepare(config).unwrap();
+        let (prepared, bytes) = prepare(config, Some("demo-password")).unwrap();
         let payload: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(payload["schema"], "ai_keyboard.v1");
         assert_eq!(payload["target_platform"], "macos");
         assert_eq!(payload["ptt_hotkey"], "EasyInputVoice");
         assert_eq!(payload["edit_ptt_hotkey"], "EasyInputEdit");
         assert_eq!(payload["profiles"][0]["keys"]["KEY1"]["press"], "voice_ptt_hold");
-        assert_eq!(payload["profiles"][0]["keys"]["KEY3"]["press"], "copy");
+        assert_eq!(payload["profiles"][0]["keys"]["KEY3"]["press"]["hotkey"], "EasyInputRealtime");
+        assert_eq!(payload["wifi_password"], "demo-password");
         let host_action = payload["profiles"][0]["keys"]["KEY7"]["press"].as_str().unwrap();
         assert!(host_action.starts_with("host_action:"));
         assert!(!String::from_utf8(bytes).unwrap().contains("Safari.app"));
         assert!(prepared.keys[6].host_action_id.is_some());
+    }
+
+    #[test]
+    fn validates_wifi_field_limits() {
+        let mut config = KeyboardConfig::default();
+        config.wifi.ssid = "x".repeat(33);
+        assert!(prepare(config, None).unwrap_err().contains("32 字节"));
+
+        let mut config = KeyboardConfig::default();
+        config.wifi.ssid = "Office".into();
+        assert!(prepare(config, Some("short")).unwrap_err().contains("8–63"));
     }
 }

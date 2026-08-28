@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AudioLines, CircleHelp, Settings, UserRound } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getRuntimeSnapshot } from "./api";
-import type { HardwareEditButtonEvent, HardwareVoiceButtonEvent, RuntimeSnapshot } from "./types";
+import type { HardwareEditButtonEvent, HardwareRealtimeButtonEvent, HardwareVoiceButtonEvent, RuntimeSnapshot } from "./types";
 import { OverviewPage } from "./pages/OverviewPage";
 import { VoicePage } from "./pages/VoicePage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -13,10 +13,11 @@ import { AccountPage } from "./pages/AccountPage";
 import { HelpPage } from "./pages/HelpPage";
 import { Onboarding } from "./components/Onboarding";
 import { SpeechConfigPage } from "./pages/SpeechConfigPage";
+import { RealtimeCallPage } from "./pages/RealtimeCallPage";
 
-export type PageId = "overview" | "voice" | "history" | "dictionary" | "keyboard" | "speechConfig" | "settings" | "account" | "help";
+export type PageId = "overview" | "voice" | "call" | "history" | "dictionary" | "keyboard" | "speechConfig" | "settings" | "account" | "help";
 const primary: { id: PageId; label: string }[] = [
-  { id: "overview", label: "概览" }, { id: "voice", label: "语音" }, { id: "history", label: "历史" },
+  { id: "overview", label: "概览" }, { id: "voice", label: "语音" }, { id: "call", label: "通话" }, { id: "history", label: "历史" },
   { id: "dictionary", label: "词库" }, { id: "keyboard", label: "键盘" }
 ];
 
@@ -26,6 +27,7 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [hardwareTrigger, setHardwareTrigger] = useState<HardwareVoiceButtonEvent>();
   const [hardwareEditTrigger, setHardwareEditTrigger] = useState<HardwareEditButtonEvent>();
+  const [hardwareRealtimeTrigger, setHardwareRealtimeTrigger] = useState<HardwareRealtimeButtonEvent>();
   const [onboarding, setOnboarding] = useState(() => localStorage.getItem("easyinput.onboarding.completed") !== "1");
 
   const refresh = async () => {
@@ -38,7 +40,8 @@ export default function App() {
     const unlisteners: UnlistenFn[] = [];
     void Promise.all([
       listen<HardwareVoiceButtonEvent>("hardware-voice-button", event => { setHardwareTrigger(event.payload); setPage("voice"); }),
-      listen<HardwareEditButtonEvent>("hardware-edit-button", event => { setHardwareEditTrigger(event.payload); setPage("voice"); })
+      listen<HardwareEditButtonEvent>("hardware-edit-button", event => { setHardwareEditTrigger(event.payload); setPage("voice"); }),
+      listen<HardwareRealtimeButtonEvent>("hardware-realtime-button", event => { setHardwareRealtimeTrigger(event.payload); setPage("call"); })
     ]).then(values => disposed ? values.forEach(value=>value()) : unlisteners.push(...values));
     return () => { disposed = true; unlisteners.forEach(value=>value()); };
   }, []);
@@ -49,6 +52,7 @@ export default function App() {
     switch (page) {
       case "overview": return <OverviewPage {...props} navigate={target=>setPage(target)} />;
       case "voice": return <VoicePage {...props} hardwareTrigger={hardwareTrigger} hardwareEditTrigger={hardwareEditTrigger} />;
+      case "call": return <RealtimeCallPage hardwareTrigger={hardwareRealtimeTrigger} openSettings={() => setPage("speechConfig")} />;
       case "history": return <HistoryPage />;
       case "dictionary": return <DictionaryPage />;
       case "keyboard": return <KeyboardPage {...props} />;
@@ -57,7 +61,7 @@ export default function App() {
       case "account": return <AccountPage />;
       case "help": return <HelpPage runtime={runtime} />;
     }
-  }, [page, runtime, hardwareTrigger, hardwareEditTrigger]);
+  }, [page, runtime, hardwareTrigger, hardwareEditTrigger, hardwareRealtimeTrigger]);
 
   return <div className="app-shell">
     {onboarding && <Onboarding onComplete={() => { localStorage.setItem("easyinput.onboarding.completed", "1"); setOnboarding(false); }} />}

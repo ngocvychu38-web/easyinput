@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ActivityDay, AppSettings, ArkConnectionTest, ArkModelConfig, DictionaryData, DictionaryExport, DictionaryImport, DoubaoConnectionTest, DoubaoSpeechConfig, HistoryEntry, InstalledApplication, KeyboardConfig, OperationResult, RuntimeSnapshot } from "./types";
+import type { ActivityDay, AppSettings, ArkConnectionTest, ArkModelConfig, DictionaryData, DictionaryExport, DictionaryImport, DoubaoConnectionTest, DoubaoSpeechConfig, HistoryEntry, InstalledApplication, KeyboardConfig, OperationResult, RealtimeCallState, RealtimeConnectionTest, RealtimeVoiceConfig, RuntimeSnapshot, WifiScanResult } from "./types";
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 let mockSnapshot: RuntimeSnapshot | undefined;
@@ -12,7 +12,7 @@ async function mockRuntime(): Promise<RuntimeSnapshot> {
     capabilities: { config: true, microphone: true, speakerSync: true, agentLight: true, firmwareVersion: "0.4.53" },
     diagnostics: { packets: 0, bytes: 0, sequenceGaps: 0, outOfOrder: 0, rms: 0, peak: 0 }, settings: DEFAULT_SETTINGS,
     keyboardConfig: { revision: 1, targetPlatform: "MacOS", pttHotkey: "RightMeta", editPttHotkey: "RightOption", pttMode: "Hold",
-      keys: ["语音输入", "语音编辑", "复制", "粘贴", "撤销", "全选", "打开历史", "禁用"].map((label, index) => ({ kind: (["VoicePtt","EditPtt","Copy","Paste","Undo","SelectAll","HostAction","Disabled"] as const)[index], label })),
+      keys: ["语音输入", "语音编辑", "实时通话", "复制", "粘贴", "撤销", "全选", "打开历史"].map((label, index) => ({ kind: (["VoicePtt","EditPtt","RealtimeVoice","Copy","Paste","Undo","SelectAll","HostAction"] as const)[index], label })),
       encoder: { press: { kind: "ScrollAxisToggle", label: "切换滚动方向" }, axis: "Vertical", speed: 3, reverse: false },
       wifi: { ssid: "HUAWEI-1CRYV0", passwordSaved: true, audioHost: "192.168.1.12", audioPort: 17333 } },
     todayChars: 0, todayDurationMs: 0
@@ -43,10 +43,17 @@ export async function listInstalledApplications(): Promise<InstalledApplication[
   if (inTauri()) return invoke<InstalledApplication[]>("list_installed_applications");
   return ["Safari", "Mail", "Calendar", "Notes", "Terminal", "System Settings"].map(name => ({ name, path: `/Applications/${name}.app` }));
 }
-export async function pushKeyboardConfig(config: KeyboardConfig) {
-  if (inTauri()) return invoke<OperationResult>("push_ai_keyboard_config", { config });
+export async function listAvailableWifiNetworks(): Promise<WifiScanResult> {
+  if (inTauri()) return invoke<WifiScanResult>("list_available_wifi_networks");
+  const snapshot = await mockRuntime();
+  const ssid = snapshot.keyboardConfig.wifi.ssid;
+  return { interface: "en0", currentSsid: ssid, localIp: snapshot.keyboardConfig.wifi.audioHost, networks: ssid ? [{ ssid, current: true, remembered: true, configured: true }] : [] };
+}
+export async function pushKeyboardConfig(config: KeyboardConfig, wifiPassword?: string) {
+  const password = typeof wifiPassword === "string" ? wifiPassword : undefined;
+  if (inTauri()) return invoke<OperationResult>("push_ai_keyboard_config", { config, wifiPassword: password || null });
   const snap = await mockRuntime();
-  mockSnapshot = { ...snap, keyboardConfig: { ...config, revision: config.revision + 1 } };
+  mockSnapshot = { ...snap, keyboardConfig: { ...config, revision: config.revision + 1, wifi: { ...config.wifi, passwordSaved: Boolean(password) || config.wifi.passwordSaved } } };
   return { operationId: crypto.randomUUID(), ok: true } as OperationResult;
 }
 export async function checkAppUpdate() {
@@ -88,6 +95,29 @@ export async function testArkConnection(config: ArkModelConfig, apiKey?: string)
   if (inTauri()) return invoke<OperationResult<ArkConnectionTest>>("test_ark_connection", { config, apiKey: apiKey || null });
   return { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式不能测试方舟模型鉴权" } as OperationResult<ArkConnectionTest>;
 }
+export async function getRealtimeVoiceConfig() {
+  if (inTauri()) return invoke<RealtimeVoiceConfig>("get_realtime_voice_config");
+  const { DEFAULT_REALTIME_CONFIG } = await import("./types");
+  const saved = localStorage.getItem("easyinput.realtime.config");
+  return saved ? { ...DEFAULT_REALTIME_CONFIG, ...JSON.parse(saved) } : DEFAULT_REALTIME_CONFIG;
+}
+export async function saveRealtimeVoiceConfig(config: RealtimeVoiceConfig, apiKey?: string) {
+  if (inTauri()) return invoke<OperationResult<RealtimeVoiceConfig>>("save_realtime_voice_config", { config, apiKey: apiKey || null });
+  const next = { ...config, apiKeySaved: Boolean(apiKey) || config.apiKeySaved };
+  localStorage.setItem("easyinput.realtime.config", JSON.stringify(next));
+  return { operationId: crypto.randomUUID(), ok: true, data: next } as OperationResult<RealtimeVoiceConfig>;
+}
+export async function testRealtimeVoiceConnection(config: RealtimeVoiceConfig, apiKey?: string) {
+  if (inTauri()) return invoke<OperationResult<RealtimeConnectionTest>>("test_realtime_voice_connection", { config, apiKey: apiKey || null });
+  return { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式不能测试实时语音 WebSocket 鉴权" } as OperationResult<RealtimeConnectionTest>;
+}
+export async function getRealtimeCallState(): Promise<RealtimeCallState> {
+  if (inTauri()) return invoke<RealtimeCallState>("get_realtime_call_state");
+  return { phase: "Idle", userText: "", assistantText: "", elapsedMs: 0, inputPackets: 0, outputPackets: 0 };
+}
+export async function startRealtimeCall() { return inTauri() ? invoke<OperationResult<{sessionId:string}>>("start_realtime_call") : { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式不能连接开发板" } as OperationResult<{sessionId:string}>; }
+export async function stopRealtimeCall() { return invokeMaybe<OperationResult>("stop_realtime_call"); }
+export async function interruptRealtimeCall() { return invokeMaybe<OperationResult>("interrupt_realtime_call"); }
 
 async function invokeMaybe<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (inTauri()) return invoke<T>(command, args);

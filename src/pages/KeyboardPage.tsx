@@ -5,8 +5,8 @@ import {
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { checkAppUpdate, listInstalledApplications, openBluetoothSettings, openInputMonitoringSettings, pushKeyboardConfig, readKeyboardStatus } from "../api";
-import type { InstalledApplication, KeyboardActionKind, KeyboardConfig, OperationResult, RuntimeSnapshot } from "../types";
+import { checkAppUpdate, listAvailableWifiNetworks, listInstalledApplications, openBluetoothSettings, openInputMonitoringSettings, pushKeyboardConfig, readKeyboardStatus } from "../api";
+import type { InstalledApplication, KeyboardActionKind, KeyboardConfig, OperationResult, RuntimeSnapshot, WifiNetwork } from "../types";
 import { Button, SectionLabel, Toggle } from "../components/Ui";
 
 type DeviceTab = "keys" | "microphone" | "network" | "audio" | "agent" | "firmware";
@@ -22,6 +22,7 @@ const tabs: { id: DeviceTab; title: string; subtitle: string }[] = [
 
 const actionOptions: { kind: KeyboardActionKind; label: string }[] = [
   { kind: "VoicePtt", label: "语音输入" }, { kind: "EditPtt", label: "语音编辑" },
+  { kind: "RealtimeVoice", label: "实时通话" },
   { kind: "Enter", label: "回车" }, { kind: "Backspace", label: "退格" },
   { kind: "SelectAll", label: "全选" }, { kind: "Cut", label: "剪切" },
   { kind: "Copy", label: "复制" }, { kind: "Paste", label: "粘贴" },
@@ -61,7 +62,7 @@ function SyncCard({ busy, status, bytes, onSync }: { busy: boolean; status: stri
     <div className="panel-heading"><b>同步到键盘</b><span><Check size={15} />{status || "本机已保存"}</span></div>
     <p>修改会先保存在本机，连接键盘后同步生效。</p>
     <div className="sync-space"><span>内容空间</span><b>{bytes}/2048 字节</b></div>
-    <Button kind="primary" onClick={onSync} disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在同步" : "重新同步"}</Button>
+    <Button kind="primary" onClick={() => onSync()} disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}{busy ? "正在同步" : "重新同步"}</Button>
     {permissionRequired && <Button onClick={() => void openInputMonitoringSettings()}><ShieldAlert size={16} />打开输入监控设置</Button>}
   </aside>;
 }
@@ -140,23 +141,56 @@ function MicrophonePanel() {
   return <><div className="keyboard-content-head"><SectionLabel index="01">麦克风</SectionLabel></div><section className="soft-panel microphone-choice"><b>麦克风来源</b><p>选择录音时优先使用的麦克风；如果键盘麦克风不可用，本次会使用电脑麦克风。录音开始后不会中途切换。</p><div className="large-segmented"><button className={source === "computer" ? "active" : ""} onClick={() => setSource("computer")}><Mic2 size={17} />电脑</button><button className={source === "keyboard" ? "active" : ""} onClick={() => setSource("keyboard")}><Keyboard size={17} />键盘优先</button></div></section><section className="availability-banner"><div><b>键盘麦克风已可用</b><p>键盘和电脑已连接到同一网络。</p></div><Button>查看网络</Button></section></>;
 }
 
-function NetworkPanel({ config, setConfig, sync, syncState, busy }: { config: KeyboardConfig; setConfig(value: KeyboardConfig): void; sync(): void; syncState: string; busy: boolean }) {
+function NetworkPanel({ config, setConfig, sync, syncState, busy }: { config: KeyboardConfig; setConfig(value: KeyboardConfig): void; sync(password?: string): Promise<boolean>; syncState: string; busy: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
-  const [password, setPassword] = useState(config.wifi.passwordSaved ? "saved-password" : "");
-  const [detected, setDetected] = useState(false);
+  const [password, setPassword] = useState("");
+  const [networks, setNetworks] = useState<WifiNetwork[]>([]);
+  const [manualSsid, setManualSsid] = useState(false);
+  const [loadingNetworks, setLoadingNetworks] = useState(false);
+  const [networkError, setNetworkError] = useState("");
+  const [networkWarning, setNetworkWarning] = useState("");
+  const [wifiInterface, setWifiInterface] = useState("");
   const bytes = new TextEncoder().encode(JSON.stringify(config)).length;
   const patchWifi = (patch: Partial<KeyboardConfig["wifi"]>) => setConfig({ ...config, wifi: { ...config.wifi, ...patch } });
-  const autoDetect = () => { setDetected(true); if (!config.wifi.ssid) patchWifi({ ssid: "当前电脑的 Wi‑Fi" }); };
+  const loadNetworks = async () => {
+    if (loadingNetworks) return;
+    setLoadingNetworks(true); setNetworkError(""); setNetworkWarning("");
+    try {
+      const result = await listAvailableWifiNetworks();
+      setNetworks(result.networks); setWifiInterface(result.interface); setNetworkWarning(result.warning || "");
+      const selectedSsid = config.wifi.ssid || result.currentSsid || "";
+      const patch: Partial<KeyboardConfig["wifi"]> = {};
+      if (!config.wifi.ssid && result.currentSsid) patch.ssid = result.currentSsid;
+      if (!config.wifi.audioHost && result.localIp) patch.audioHost = result.localIp;
+      if (Object.keys(patch).length) patchWifi(patch);
+      setManualSsid(Boolean(selectedSsid) && !result.networks.some(item => item.ssid === selectedSsid));
+    } catch (reason) {
+      setNetworkError(reason instanceof Error ? reason.message : String(reason));
+      setManualSsid(true);
+    } finally { setLoadingNetworks(false); }
+  };
+  useEffect(() => { void loadNetworks(); }, []);
+  const selectSsid = (value: string) => {
+    if (value === "__manual__") { setManualSsid(true); if (!config.wifi.ssid) patchWifi({ ssid: "", passwordSaved: false }); return; }
+    setManualSsid(false);
+    if (value !== config.wifi.ssid) { setPassword(""); patchWifi({ ssid: value, passwordSaved: false }); }
+  };
+  const changeManualSsid = (value: string) => {
+    if (value !== config.wifi.ssid) setPassword("");
+    patchWifi({ ssid: value, passwordSaved: false });
+  };
+  const saveAndSync = async () => { if (await sync(password)) setPassword(""); };
   return <>
     <div className="keyboard-content-head stacked"><SectionLabel index="01">网络与连接</SectionLabel><p>键盘麦克风与开机音效共用这份 Wi‑Fi 配置，使用时请让键盘与电脑连接到同一个路由器。</p></div>
-    <section className="availability-banner"><div><b>键盘网络{detected ? "已重新获取" : "已确认"}</b><p>当前键盘已确认这份网络，可用于键盘麦克风和无线音效同步。</p></div><Button onClick={autoDetect}><RefreshCw size={16} />自动获取</Button></section>
+    <section className="availability-banner"><div><b>{loadingNetworks ? "正在读取 macOS Wi‑Fi" : networks.length ? `已读取 ${networks.length} 个系统网络` : "等待选择 Wi‑Fi"}</b><p>{wifiInterface ? `系统接口 ${wifiInterface}；选择后保存在本机并同步到键盘。` : "自动读取当前网络和 macOS 已记住的网络。"}</p></div><Button onClick={() => void loadNetworks()} disabled={loadingNetworks}>{loadingNetworks ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{loadingNetworks ? "读取中" : "刷新网络"}</Button></section>
     <div className="network-layout"><section className="network-form">
       <div className="panel-heading"><div><b>连接信息</b><p>这些信息会同步到键盘，用于键盘麦克风和无线音效</p></div><span>保存在本机</span></div>
-      <div className="network-warning"><ShieldAlert size={19} /><div><b>键盘必须连接 2.4GHz Wi‑Fi，并与电脑处于同一网络</b><p>电脑使用 Wi‑Fi 时，可填写电脑当前连接的 Wi‑Fi 名称；电脑使用 5GHz Wi‑Fi 或网线时，请让键盘连接同一路由器的 2.4GHz Wi‑Fi。</p></div></div>
-      <label>Wi‑Fi 名称<span>键盘仅支持 2.4GHz Wi‑Fi；电脑可使用同一路由器的 5GHz Wi‑Fi 或有线连接。</span><input value={config.wifi.ssid} onChange={event => patchWifi({ ssid: event.target.value })} placeholder="输入网络名称（SSID）" /></label>
-      <label>电脑接收地址<span>用于接收键盘麦克风音频。</span><input value={config.wifi.audioHost} onChange={event => patchWifi({ audioHost: event.target.value })} placeholder="例如 192.168.1.10" /></label>
-      <label>Wi‑Fi 密码<span>开放网络可留空</span><div className="password-wrap"><input type={showPassword ? "text" : "password"} value={password} onChange={event => setPassword(event.target.value)} placeholder="输入 Wi‑Fi 密码"/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
-    </section><div className="network-side"><SyncCard busy={busy} status={syncState} bytes={bytes} onSync={sync} /><section className="usage-card"><b>这份网络用于</b><div><strong>键盘麦克风</strong><p>把键盘采集的声音实时发送到这台电脑。</p></div><div className="accent"><strong>开机音效</strong><p>连接数据线时直接同步；未连接时可使用 Wi‑Fi。</p></div></section></div></div>
+      <div className="network-warning"><ShieldAlert size={19} /><div><b>键盘必须连接 2.4GHz Wi‑Fi，并与电脑处于同一网络</b><p>电脑使用 Wi‑Fi 时，可选择电脑当前或系统已记住的网络；电脑使用 5GHz Wi‑Fi 或网线时，请选择同一路由器的 2.4GHz Wi‑Fi。</p></div></div>
+      <label>Wi‑Fi 名称<span>来自 macOS 当前网络和已记住的网络；也可手工输入其他 2.4GHz SSID。</span><div className="select-wrap wifi-select"><select value={manualSsid ? "__manual__" : config.wifi.ssid} onChange={event => selectSsid(event.target.value)}><option value="">请选择 Wi‑Fi</option>{networks.map(network => <option key={network.ssid} value={network.ssid}>{network.ssid}{network.current ? "（当前连接）" : network.configured ? "（当前配置）" : ""}</option>)}<option value="__manual__">手工输入其他网络…</option></select><ChevronDown size={16} /></div>{manualSsid && <input value={config.wifi.ssid} onChange={event => changeManualSsid(event.target.value)} placeholder="输入网络名称（SSID）" autoFocus />}</label>
+      <label>电脑接收地址<span>用于接收键盘麦克风音频；首次读取网络时自动填入本机地址。</span><input value={config.wifi.audioHost} onChange={event => patchWifi({ audioHost: event.target.value })} placeholder="例如 192.168.1.10" /></label>
+      <label>Wi‑Fi 密码<span>{config.wifi.passwordSaved ? "已安全保存在 EasyInput 钥匙串；留空表示不修改" : "开放网络可留空；密码不会写入本机配置文件"}</span><div className="password-wrap"><input type={showPassword ? "text" : "password"} value={password} onChange={event => setPassword(event.target.value)} placeholder={config.wifi.passwordSaved ? "已保存，输入新密码可替换" : "输入 Wi‑Fi 密码"}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
+      {networkWarning && <p className="network-form-notice">{networkWarning}</p>}{networkError && <p className="form-error network-form-notice">自动读取失败：{networkError}。仍可手工输入网络名称。</p>}
+    </section><div className="network-side"><SyncCard busy={busy} status={syncState} bytes={bytes} onSync={() => void saveAndSync()} /><section className="usage-card"><b>这份网络用于</b><div><strong>键盘麦克风</strong><p>把键盘采集的声音实时发送到这台电脑。</p></div><div className="accent"><strong>开机音效</strong><p>连接数据线时直接同步；未连接时可使用 Wi‑Fi。</p></div></section></div></div>
   </>;
 }
 
@@ -170,7 +204,7 @@ function AudioPanel({ sync }: { sync(): void }) {
     <div className="sound-grid">{sounds.map((sound, index) => <button key={sound.name} className={selected === index && !fileName ? "selected" : ""} onClick={() => { setSelected(index); setFileName(""); }}><i /><b>{sound.name}{sound.default && <em>默认</em>}</b><span>{sound.description}</span><small>{sound.duration}</small></button>)}</div>
     <div className="sound-toggle"><div><b>开机音效</b><span>完整开机时播放已选音效，切换后需同步到键盘</span></div><small>{enabled ? "已开启" : "已关闭"}</small><Toggle value={enabled} onChange={setEnabled} label="开机音效" /></div>
     <button className={`uploaded-sound ${fileName ? "has-file" : ""}`} onClick={() => fileRef.current?.click()}><span><Upload size={18} /></span><div><b>{fileName || "导入自己的开机音效"}</b><small>EasyInput 会自动转换音频格式，无需手动处理</small></div><strong>{fileName ? "重新选择" : "选择音频"}</strong></button><input ref={fileRef} hidden type="file" accept="audio/*" onChange={event => setFileName(event.target.files?.[0]?.name || "")} />
-  </section><aside className="sound-sync-card"><div className="panel-heading"><b>同步到键盘</b><Check size={18} /></div><div><span>音效状态</span><b>{enabled ? "已选择" : "已关闭"}</b></div><div><span>当前通道</span><b>连接设备后确认</b></div><Button kind="primary" onClick={sync}><Send size={17} />同步开机音效</Button><p>使用语音或按键时会暂停同步，结束后继续；如果中断，当前音效不会受到影响。</p></aside></div></>;
+  </section><aside className="sound-sync-card"><div className="panel-heading"><b>同步到键盘</b><Check size={18} /></div><div><span>音效状态</span><b>{enabled ? "已选择" : "已关闭"}</b></div><div><span>当前通道</span><b>连接设备后确认</b></div><Button kind="primary" onClick={() => sync()}><Send size={17} />同步开机音效</Button><p>使用语音或按键时会暂停同步，结束后继续；如果中断，当前音效不会受到影响。</p></aside></div></>;
 }
 
 function AgentPanel() {
@@ -201,7 +235,7 @@ export function KeyboardPage({ runtime, refresh }: { runtime: RuntimeSnapshot; r
   const [syncState, setSyncState] = useState("");
   const detect = async () => { setChecking(true); try { await readKeyboardStatus(); await refresh(); } finally { setChecking(false); } };
   const openBluetooth = async () => { setOpeningBluetooth(true); setOpenError(""); try { const result = await openBluetoothSettings(); if (!result.ok) setOpenError(result.message ?? "无法打开系统蓝牙设置"); } catch (reason) { setOpenError(reason instanceof Error ? reason.message : String(reason)); } finally { setOpeningBluetooth(false); } };
-  const sync = async () => { setSyncing(true); setSyncState("同步中"); try { const result = await pushKeyboardConfig(config); setSyncState(result.ok ? (connected ? "已确认" : "已保存在本机") : result.message || "同步失败"); if (result.ok) await refresh(); } catch (error) { setSyncState(error instanceof Error ? error.message : String(error)); } finally { setSyncing(false); } };
+  const sync = async (wifiPassword?: string) => { setSyncing(true); setSyncState("同步中"); try { const result = await pushKeyboardConfig(config, wifiPassword); const locallySaved = result.ok || Boolean(result.message?.includes("已保存在本机")); setSyncState(result.ok ? (connected ? "已确认" : "已保存在本机") : result.message || "同步失败"); if (wifiPassword?.trim() && locallySaved) setConfig(value => ({ ...value, wifi: { ...value.wifi, passwordSaved: true } })); if (result.ok) await refresh(); return locallySaved; } catch (error) { setSyncState(error instanceof Error ? error.message : String(error)); return false; } finally { setSyncing(false); } };
   const currentVersion = runtime.capabilities.firmwareVersion || "0.4.53";
   const activeContent = useMemo(() => {
     if (tab === "keys") return <KeysPanel config={config} setConfig={setConfig} sync={sync} syncState={syncState} busy={syncing} />;

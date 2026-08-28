@@ -5,9 +5,13 @@ export type DeviceConnectionState = "Disconnected" | "Discovering" | "ConnectedU
 export type ConfigSyncState = "LocalOnly" | "Pending" | "Syncing" | "Confirmed" | "Failed" | "Unknown";
 export interface DeviceCapabilities { config: boolean; microphone: boolean; speakerSync: boolean; agentLight: boolean; firmwareVersion?: string }
 export interface AudioStreamDiagnostics { packets: number; bytes: number; sequenceGaps: number; outOfOrder: number; rms: number; peak: number; lastHeartbeatAt?: string; lastError?: string }
-export type KeyboardActionKind = "VoicePtt" | "EditPtt" | "Enter" | "Backspace" | "Cut" | "SelectAll" | "Copy" | "Paste" | "Undo" | "Hotkey" | "FixedText" | "OpenApp" | "ScrollAxisToggle" | "CaretSelect" | "Disabled" | "HostAction";
+export type KeyboardActionKind = "VoicePtt" | "EditPtt" | "RealtimeVoice" | "Enter" | "Backspace" | "Cut" | "SelectAll" | "Copy" | "Paste" | "Undo" | "Hotkey" | "FixedText" | "OpenApp" | "ScrollAxisToggle" | "CaretSelect" | "Disabled" | "HostAction";
 export interface KeyboardAction { kind: KeyboardActionKind; label: string; value?: string; hostActionId?: string }
 export interface InstalledApplication { name: string; path: string }
+export interface WifiNetwork { ssid: string; current: boolean; remembered: boolean; configured: boolean }
+export interface WifiScanResult {
+  interface: string; currentSsid?: string; localIp?: string; networks: WifiNetwork[]; warning?: string;
+}
 export interface KeyboardConfig {
   revision: number; targetPlatform: "MacOS"; pttHotkey: string; editPttHotkey: string; pttMode: "Hold" | "Toggle";
   keys: KeyboardAction[]; encoder: { press: KeyboardAction; axis: "Vertical" | "Horizontal"; speed: number; reverse: boolean };
@@ -29,11 +33,22 @@ export interface DoubaoSpeechConfig {
 }
 export interface ArkModelConfig { enabled: boolean; endpoint: string; model: string; apiKeySaved: boolean }
 export interface ArkConnectionTest { latencyMs: number; model: string }
+export interface RealtimeVoiceConfig {
+  enabled: boolean; endpoint: string; model: string; instructions: string; voice: string; speed: number; loudness: number;
+  strictAudit: boolean; enableLoudnessNorm: boolean; enableUserQueryExit: boolean; greeting: string; apiKeySaved: boolean;
+}
+export type RealtimeCallPhase = "Idle" | "Connecting" | "Listening" | "Speaking" | "Closing" | "Error";
+export interface RealtimeCallState {
+  phase: RealtimeCallPhase; sessionId?: string; userText: string; assistantText: string; elapsedMs: number;
+  inputPackets: number; outputPackets: number; error?: string; logId?: string;
+}
+export interface RealtimeConnectionTest { latencyMs: number; endpoint: string; model: string; logId?: string }
 export interface DoubaoConnectionTest { latencyMs: number; endpoint: string; resourceId: string; logId?: string }
 export interface SpeechTranscriptEvent { sessionId: string; text: string; definite: boolean; sequence?: number }
 export interface SpeechSessionEvent { sessionId: string; phase: RecordingPhase; text: string; durationMs: number; message?: string }
 export interface HardwareVoiceButtonEvent { pressed: boolean; source: "app-report" | "keyboard-report"; sequence: number }
 export interface HardwareEditButtonEvent { pressed: boolean; sequence: number; hasSelection: boolean }
+export interface HardwareRealtimeButtonEvent { pressed: boolean; sequence: number }
 export interface RuntimeSnapshot {
   version: string; voiceService: VoiceServiceState; recording: RecordingState; device: DeviceConnectionState; capabilities: DeviceCapabilities;
   diagnostics: AudioStreamDiagnostics; settings: AppSettings; keyboardConfig: KeyboardConfig; todayChars: number; todayDurationMs: number;
@@ -52,4 +67,9 @@ export const DEFAULT_DOUBAO_CONFIG: DoubaoSpeechConfig = {
 };
 export const DEFAULT_ARK_CONFIG: ArkModelConfig = {
   enabled: false, endpoint: "https://ark.cn-beijing.volces.com/api/v3/responses", model: "doubao-seed-2-0-lite-260215", apiKeySaved: false
+};
+export const DEFAULT_REALTIME_CONFIG: RealtimeVoiceConfig = {
+  enabled: false, endpoint: "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue", model: "1.2.6.1",
+  instructions: "你是一个友好、简洁的中文语音助手。优先直接回答用户问题。", voice: "zh_male_xiaotian_jupiter_bigtts",
+  speed: 0, loudness: 0, strictAudit: true, enableLoudnessNorm: true, enableUserQueryExit: false, greeting: "", apiKeySaved: false
 };
