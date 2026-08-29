@@ -23,7 +23,14 @@ fn action_value(action: &mut KeyboardAction, platform: &str) -> Result<Value, St
     match action.kind {
         KeyboardActionKind::VoicePtt => Ok(json!("voice_ptt_hold")),
         KeyboardActionKind::EditPtt => Ok(json!("edit_ptt_hold")),
-        KeyboardActionKind::RealtimeVoice => Ok(hotkey("EasyInputRealtime")),
+        // Realtime voice is a host-side action, but released firmware only
+        // turns concrete keyboard chords into HID reports for generic hotkey
+        // actions.  "EasyInputRealtime" is not a HID key name and therefore
+        // produces no report on those builds.  Reserve Ctrl+Shift+R and let
+        // the desktop client consume the chord as a toggle.  Newer firmware
+        // may still send the dedicated EasyInputRealtime App Command, which
+        // remains supported by the host listener.
+        KeyboardActionKind::RealtimeVoice => Ok(hotkey("Ctrl+Shift+R")),
         KeyboardActionKind::Enter => Ok(hotkey("Return")),
         KeyboardActionKind::Backspace => Ok(hotkey("Backspace")),
         KeyboardActionKind::Cut => Ok(hotkey(format!("{command_modifier}+X"))),
@@ -155,7 +162,7 @@ mod tests {
         assert_eq!(payload["ptt_hotkey"], "EasyInputVoice");
         assert_eq!(payload["edit_ptt_hotkey"], "EasyInputEdit");
         assert_eq!(payload["profiles"][0]["keys"]["KEY1"]["press"], "voice_ptt_hold");
-        assert_eq!(payload["profiles"][0]["keys"]["KEY3"]["press"]["hotkey"], "EasyInputRealtime");
+        assert_eq!(payload["profiles"][0]["keys"]["KEY3"]["press"]["hotkey"], "Ctrl+Shift+R");
         assert_eq!(payload["wifi_password"], "demo-password");
         let host_action = payload["profiles"][0]["keys"]["KEY7"]["press"].as_str().unwrap();
         assert!(host_action.starts_with("host_action:"));

@@ -90,6 +90,7 @@ pub fn start_voice_button_listener(app: tauri::AppHandle, hub: Arc<DeviceEventHu
         let mut last_voice_state = None;
         let mut voice_sequence = 0_u64;
         let mut last_edit_state = None;
+        let mut edit_pressed_at: Option<std::time::Instant> = None;
         let mut edit_sequence = 0_u64;
         let mut last_realtime_state = None;
         let mut realtime_sequence = 0_u64;
@@ -154,11 +155,10 @@ pub fn start_voice_button_listener(app: tauri::AppHandle, hub: Arc<DeviceEventHu
                             AppCommand::Hotkey { pressed, hotkey } if hotkey.eq_ignore_ascii_case("EasyInputEdit") => {
                                 if last_edit_state != Some(pressed) {
                                     last_edit_state = Some(pressed);
+                                    if pressed { edit_pressed_at = Some(std::time::Instant::now()); }
+                                    else { eprintln!("EasyInput edit release received: source=app-report, held_ms={}",edit_pressed_at.take().map(|at|at.elapsed().as_millis()).unwrap_or(0)); }
                                     let has_selection = if pressed {
-                                        let selection = crate::input::selected_text().unwrap_or(None);
-                                        let present = selection.as_ref().is_some_and(|value| !value.is_empty());
-                                        crate::set_edit_context(&app, selection);
-                                        present
+                                        crate::capture_edit_context(&app)
                                     } else { false };
                                     edit_sequence = edit_sequence.wrapping_add(1);
                                     let _ = app.emit("hardware-edit-button", HardwareEditButtonEvent { pressed, sequence: edit_sequence, has_selection });
@@ -193,14 +193,22 @@ pub fn start_voice_button_listener(app: tauri::AppHandle, hub: Arc<DeviceEventHu
                             last_edit_state = Some(false);
                         } else if last_edit_state != Some(pressed) {
                             last_edit_state = Some(pressed);
+                            if pressed { edit_pressed_at = Some(std::time::Instant::now()); }
+                            else { eprintln!("EasyInput edit release received: source=keyboard-report, held_ms={}",edit_pressed_at.take().map(|at|at.elapsed().as_millis()).unwrap_or(0)); }
                             let has_selection = if pressed {
-                                let selection = crate::input::selected_text().unwrap_or(None);
-                                let present = selection.as_ref().is_some_and(|value| !value.is_empty());
-                                crate::set_edit_context(&app, selection);
-                                present
+                                crate::capture_edit_context(&app)
                             } else { false };
                             edit_sequence = edit_sequence.wrapping_add(1);
                             let _ = app.emit("hardware-edit-button", HardwareEditButtonEvent { pressed, sequence: edit_sequence, has_selection });
+                        }
+                    }
+                    if let Some(pressed) = crate::protocol::usb::realtime_button_state(report) {
+                        if last_realtime_state.is_none() && !pressed {
+                            last_realtime_state = Some(false);
+                        } else if last_realtime_state != Some(pressed) {
+                            last_realtime_state = Some(pressed);
+                            realtime_sequence = realtime_sequence.wrapping_add(1);
+                            let _ = app.emit("hardware-realtime-button", HardwareRealtimeButtonEvent { pressed, sequence: realtime_sequence });
                         }
                     }
                 }

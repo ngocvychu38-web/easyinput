@@ -27,6 +27,13 @@ function isActive(phase: RealtimeCallPhase) {
   return phase === "Connecting" || phase === "Listening" || phase === "Speaking" || phase === "Closing";
 }
 
+function errorHint(message: string) {
+  if (message.includes("52000033") || message.includes("AudioServerNoAudioInputTooLongError")) {
+    return "开发板曾停止上传麦克风音频。新版固件会取消 5 分钟限制，并在短暂断流时自动暂停云端音频输入。";
+  }
+  return "确认实时语音 API Key 已保存、功能已启用，并且开发板与电脑在同一网络。";
+}
+
 export function RealtimeCallPage({ hardwareTrigger, openSettings }: { hardwareTrigger?: HardwareRealtimeButtonEvent; openSettings(): void }) {
   const [call, setCall] = useState<RealtimeCallState>(EMPTY_STATE);
   const [actionError, setActionError] = useState("");
@@ -101,7 +108,7 @@ export function RealtimeCallPage({ hardwareTrigger, openSettings }: { hardwareTr
       </div>
     </section>
 
-    {(actionError || call.error) && <div className="voice-error">{actionError || call.error}<small>确认实时语音 API Key 已保存、功能已启用，并且开发板与电脑在同一网络。</small></div>}
+    {(actionError || call.error) && <div className="voice-error">{actionError || call.error}<small>{errorHint(actionError || call.error || "")}</small></div>}
 
     <div className="conversation-grid">
       <article><header><Mic2 /><span>你说</span><small>{call.inputPackets} 帧上行</small></header><p>{call.userText || "通话开始后，识别到的内容会显示在这里。"}</p></article>

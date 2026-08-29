@@ -233,7 +233,15 @@ export function KeyboardPage({ runtime, refresh }: { runtime: RuntimeSnapshot; r
   const [config, setConfig] = useState<KeyboardConfig>(runtime.keyboardConfig);
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState("");
-  const detect = async () => { setChecking(true); try { await readKeyboardStatus(); await refresh(); } finally { setChecking(false); } };
+  const detect = async () => {
+    setChecking(true);setOpenError("");
+    try {
+      const result=await readKeyboardStatus() as OperationResult;
+      if(!result.ok)setOpenError(result.message??"设备检测失败");
+      await refresh();
+    } catch(reason){setOpenError(reason instanceof Error?reason.message:String(reason))}
+    finally { setChecking(false); }
+  };
   const openBluetooth = async () => { setOpeningBluetooth(true); setOpenError(""); try { const result = await openBluetoothSettings(); if (!result.ok) setOpenError(result.message ?? "无法打开系统蓝牙设置"); } catch (reason) { setOpenError(reason instanceof Error ? reason.message : String(reason)); } finally { setOpeningBluetooth(false); } };
   const sync = async (wifiPassword?: string) => { setSyncing(true); setSyncState("同步中"); try { const result = await pushKeyboardConfig(config, wifiPassword); const locallySaved = result.ok || Boolean(result.message?.includes("已保存在本机")); setSyncState(result.ok ? (connected ? "已确认" : "已保存在本机") : result.message || "同步失败"); if (wifiPassword?.trim() && locallySaved) setConfig(value => ({ ...value, wifi: { ...value.wifi, passwordSaved: true } })); if (result.ok) await refresh(); return locallySaved; } catch (error) { setSyncState(error instanceof Error ? error.message : String(error)); return false; } finally { setSyncing(false); } };
   const currentVersion = runtime.capabilities.firmwareVersion || "0.4.53";

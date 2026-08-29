@@ -1,66 +1,155 @@
-# EasyInput Intel Mac
+# EasyInput
 
-EasyInput 管理端 Intel 芯片 Mac 版本，支持基础键盘管理、歌曲/音效播放和豆包全双工实时语音功能。当前版本为 EasyInput 0.1.29，目标为纯 `x86_64-apple-darwin`，最低支持 macOS 12。
+> 面向 EasyInput AI 键盘的 Intel Mac 桌面客户端：把硬件按键、语音输入、选区语音编辑和实时通话整合为一套原生 macOS 工作流。
 
-## 当前实现
+![EasyInput 概览](docs/images/easyinput-tutorial/01-overview.png)
 
-- 概览、语音、实时通话、历史、词库、键盘、设置、账户和帮助页面；键盘控制台含按键、麦克风、网络、音效、编程助手和键盘更新 6 个子页。
-- Tauri 2.11.2 + React/Vite/TypeScript + Rust 应用外壳，关闭窗口时隐藏而不退出。
-- 本机 `config.json`、`dictionary.json` 和 SQLite `history.db`；敏感值接口使用 macOS Keychain。
-- USB HID 发现及配置分片，VID/PID、Report ID、2048 字节限制、52 字节分片和 CRC16-CCITT。
-- 开发板语音键持续监听：兼容 `0x11` 专用 PTT 报告与旧固件右 Command 键盘报告，支持按住/切换两种触发模式。
-- 豆包流式语音识别 2.0：默认使用 `volc.bigasr.sauc.duration`，旧版错误资源 ID 会自动迁移。
-- 豆包实时语音 3.0：开发板麦克风 16 kHz PCM 上行、模型 24 kHz PCM 回传开发板扬声器，支持开场白、实时转写、语音回复和打断。
-- 火山方舟语音编辑：无选区时回答语音问题，有选区时将选中文本作为上下文并用回答替换选区。
-- macOS Wi-Fi 信息读取、密码钥匙串保存和开发板配置同步；支持系统应用列表与手工选择应用的按键映射。
-- 无硬件时可进入设备设置预览，浏览器开发模式提供可交互设备夹具；真实同步仍由 Tauri 设备适配层负责。
-- `EIAU v2` 音频包、`EIHB` 心跳、`EICC` 控制包的字节级解析与 Golden Vector 测试。
-- 豆包/火山引擎大模型流式语音识别配置页，支持 2.0/1.0 小时版与并发版 Resource ID、官方 WSS 握手测试和 Keychain 凭据保存。
-- 录音 `sessionId`、设备 `endpointEpoch`、配置 `revision` 和长操作 `operationId` 边界。
+当前版本为 `0.1.29`，目标架构为 `x86_64-apple-darwin`，最低支持 macOS 12。
 
-EasyInput 自有账号协议、Developer ID、更新签名密钥和实板确认不在仓库中。语音识别改用豆包语音官方接口；Access Token 只保存在 macOS 钥匙串，并且后端拒绝把凭据发送到非官方域名。
+## 项目简介
 
-## 开发
+EasyInput 使用 Tauri 构建本地桌面客户端，通过 USB HID 与开发板交互，并调用豆包语音和火山方舟完成语音识别、实时对话与文本编辑。应用支持在微信、Word 等输入场景中直接写入识别结果；使用语音编辑时，可读取当前选中文字作为上下文，再将翻译、总结或改写结果替换回原选区。
+
+## 核心功能
+
+- **全局语音输入**：按住开发板语音键说话，松开后将识别文字写入当前光标位置。
+- **选区语音编辑**：选中文字后说“翻译成英文”“总结这段文字”等指令，模型结果直接替换选区。
+- **桌面语音浮窗**：透明圆角浮窗、动态彩带声波、实时转写和处理状态展示。
+- **实时语音通话**：开发板麦克风上行、模型语音回复、开发板扬声器播放，支持打断。
+- **AI 键盘配置**：管理按键动作、应用启动映射、滚动方向、Wi-Fi 与设备配置同步。
+- **词库与历史**：维护热词和替换规则，查询本地输入历史与统计数据。
+- **本机安全存储**：配置、词库和历史保存在本机；API Key、Access Token 与 Wi-Fi 密码使用 macOS Keychain。
+
+## 界面预览
+
+| 语音输入 | 实时通话 | 键盘配置 |
+|---|---|---|
+| ![语音输入](docs/images/easyinput-tutorial/02-voice.png) | ![实时通话](docs/images/easyinput-tutorial/03-realtime-call.png) | ![键盘配置](docs/images/easyinput-tutorial/06-keyboard.png) |
+
+## 技术架构
+
+```mermaid
+flowchart LR
+    Board["EasyInput 开发板"] -->|"USB HID / PCM"| Rust["Tauri / Rust 本地服务"]
+    UI["React + TypeScript 界面"] <-->|"Tauri IPC / Events"| Rust
+    Rust -->|"流式 ASR"| ASR["豆包语音识别"]
+    Rust -->|"文本生成"| Ark["火山方舟 Responses API"]
+    Rust -->|"全双工语音"| Realtime["豆包实时语音"]
+    Rust --> Local["SQLite / JSON / Keychain"]
+    Rust --> Input["macOS Accessibility / Pasteboard"]
+```
+
+| 层级 | 技术路线 |
+|---|---|
+| 桌面外壳 | Tauri 2.11、Rust |
+| 产品界面 | React 18、TypeScript、Vite |
+| 硬件通信 | USB HID、自定义配置分片、CRC16-CCITT |
+| 语音识别 | 豆包流式语音识别 2.0，16 kHz 单声道 PCM |
+| 文本编辑 | 火山方舟 Responses API、macOS Accessibility、Pasteboard |
+| 实时通话 | 豆包实时语音 3.0、PCM 双向传输 |
+| 本地数据 | SQLite、JSON、macOS Keychain |
+
+## 快速开始
+
+### 环境要求
+
+- Intel Mac，macOS 12 或更高版本
+- Node.js 18+
+- Rust stable 与 `x86_64-apple-darwin` target
+- Xcode Command Line Tools
+
+### 安装依赖
 
 ```bash
 npm install
+rustup target add x86_64-apple-darwin
+```
+
+### 浏览器开发模式
+
+```bash
 npm run dev
 ```
 
-浏览器开发模式会使用脱敏本地夹具。启动原生应用：
+浏览器模式使用脱敏的本地设备夹具，适合开发界面；USB、Keychain、全局输入和系统权限功能需要在 Tauri 应用中验证。
+
+### 启动原生应用
 
 ```bash
 npm run tauri:dev
 ```
 
-## Intel 构建
+首次使用语音输入时，需要在 macOS 系统设置中允许 EasyInput 使用麦克风、辅助功能和输入监控。
+
+## 构建与验证
 
 ```bash
-rustup target add x86_64-apple-darwin  # 使用 rustup 时
+# 前端构建与测试
+npm run build
+npm test -- --run
+
+# Rust 测试
+cargo test --manifest-path src-tauri/Cargo.toml
+
+# Intel Mac 发布构建
 npm run tauri:build:intel
 npm run verify:intel
 ```
 
-`src-tauri/tauri.conf.json` 已固定最低 macOS 版本 12.0，发布目标为 `.app` 和 `.dmg`。未配置 Developer ID 时只能产出本地开发包。
+本地调试 `.app`：
 
-## 本机数据
+```bash
+npm run tauri:build:debug:app
+```
 
-Tauri 在 macOS 的应用数据目录中创建：
+未配置 Apple Developer ID 时，构建产物仅适合本机开发验证；正式分发还需要 Developer ID 签名与 Apple 公证。
+
+## 本机数据与凭据
+
+应用数据目录：
 
 ```text
 ~/Library/Application Support/pro.easyinput.desktop.intel/
-  config.json
-  dictionary.json
-  history.db
+├── config.json
+├── dictionary.json
+└── history.db
 ```
 
-豆包语音 Access Token 不在上述文件中，存储于登录钥匙串的 `pro.easyinput.desktop.intel / doubao-asr-access-token` 条目。
+以下内容不会写入仓库：
 
-配置通过临时文件原子替换；未来版本或损坏配置不会被自动覆盖。恢复前应先调用备份流程。
+- 豆包语音 Access Token
+- 火山方舟 API Key
+- 实时语音 API Key
+- Wi-Fi 密码
+- Apple Developer ID 与签名私钥
 
-## 安全边界
+敏感凭据由应用写入 macOS 登录钥匙串。后端同时限制模型服务域名，避免将凭据发送到非官方地址。
 
-- Wi‑Fi 音频只应在可信局域网使用；当前固件 token 不是密码学认证。
-- 固件页面只读，不刷写、不 OTA。
-- 生产更新必须在配置签名公钥后才可安装，录音/同步期间禁止安装。
-- 固件仓库代码未被复制；本项目仅依据公开线协议实现兼容层。
+## 项目目录
+
+```text
+easyinput/
+├── src/                    # React/TypeScript 产品界面
+├── src-tauri/src/          # Rust 本地能力与硬件协议
+├── src-tauri/tauri.conf.json
+├── docs/                   # 技术方案、教程与实现状态
+├── scripts/                # 构建、签名与架构验证脚本
+└── screenshots/            # 页面验收截图
+```
+
+## 详细文档
+
+- [业务功能技术实现方案](docs/EasyInput-业务功能技术实现方案.md)
+- [从零搭建到使用：小白手把手教程](docs/EasyInput-从零搭建到使用-小白手把手教程.md)
+- [当前实施状态与外部依赖](docs/IMPLEMENTATION_STATUS.md)
+
+## 当前边界
+
+- 生产发布需要正式的 Developer ID、Apple 公证账户和更新签名密钥。
+- USB HID、开发板音频和固件配置需要配合 EasyInput 实板进行端到端验收。
+- Wi-Fi 音频只应在可信局域网内使用。
+- 当前仓库不包含开发板固件源码。
+
+## License
+
+当前项目尚未附加开源许可证。除非仓库所有者另行授权，保留所有权利。

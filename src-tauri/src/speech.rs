@@ -91,11 +91,24 @@ fn request_packet(message_type:u8,flags:u8,serialization:u8,sequence:Option<i32>
  Ok(packet)
 }
 
-fn initial_packet(config:&DoubaoSpeechConfig)->Result<Vec<u8>,String>{
+fn hotword_context(hotwords:&[String])->Result<Option<String>,String>{
+ let mut seen=std::collections::HashSet::new();
+ let mut words=Vec::new();
+ for raw in hotwords{
+  let word=raw.trim();
+  if !word.is_empty()&&seen.insert(word.to_owned()){words.push(serde_json::json!({"word":word}));}
+ }
+ if words.is_empty(){return Ok(None)}
+ serde_json::to_string(&serde_json::json!({"hotwords":words})).map(Some).map_err(|e|format!("生成豆包热词上下文失败：{e}"))
+}
+
+fn initial_packet(config:&DoubaoSpeechConfig,hotwords:&[String])->Result<Vec<u8>,String>{
+ let mut request=serde_json::json!({"model_name":config.model_name,"enable_itn":config.enable_itn,"enable_punc":config.enable_punc,"show_utterances":config.show_utterances});
+ if let Some(context)=hotword_context(hotwords)?{request["context"]=serde_json::Value::String(context);}
  let payload=serde_json::json!({
   "user":{"uid":config.app_key},
   "audio":{"format":"pcm","rate":16000,"bits":16,"channel":1,"codec":"raw"},
-  "request":{"model_name":config.model_name,"enable_itn":config.enable_itn,"enable_punc":config.enable_punc,"show_utterances":config.show_utterances}
+  "request":request
  });
  request_packet(FULL_CLIENT_REQUEST,1,1,Some(1),&serde_json::to_vec(&payload).map_err(|e|e.to_string())?)
 }
@@ -144,21 +157,25 @@ fn update_transcript(app:&AppHandle,session_id:&str,text:&str,elapsed_ms:u64){
 }
 
 async fn finish_session(app:&AppHandle,session_id:&str,mut text:String,duration_ms:u64,mut error:Option<String>,source:&str){
+ let finishing=Instant::now();
  let state=app.state::<crate::AppState>();
  if let Ok(mut sessions)=state.speech_sessions.lock(){sessions.remove(session_id);}
+ let selected=if source=="KeyboardEdit"{state.edit_contexts.lock().ok().and_then(|mut values|values.remove(session_id))}else{None};
+ if source=="KeyboardEdit"{eprintln!("EasyInput edit model context: session={session_id}, present={}, chars={}",selected.is_some(),selected.as_ref().map(|text|text.chars().count()).unwrap_or(0));}
  if error.is_none()&&source=="KeyboardEdit"{
   if text.trim().is_empty(){error=Some("语音编辑没有识别到有效问题".into())}else{
-   let selected=state.edit_context.lock().ok().and_then(|mut value|value.take());
+   let model_started=Instant::now();
    match state.storage.read_config(){
     Ok(config)=>match crate::read_ark_api_key(state.inner()).await{
      Ok(api_key)=>match crate::ark::answer(&config.ark,&api_key,text.trim(),selected.as_deref()).await{
-      Ok(answer)=>{text=answer;if let Err(input_error)=crate::input::type_text(text.trim()){error=Some(input_error)}},
+      Ok(answer)=>{text=answer;let write_started=Instant::now();match crate::input::replace_selected_text(text.trim()){Ok(())=>eprintln!("EasyInput edit replacement pasted: session={session_id}, chars={}, elapsed_ms={}",text.trim().chars().count(),write_started.elapsed().as_millis()),Err(input_error)=>error=Some(input_error)}},
       Err(model_error)=>error=Some(model_error),
      },
      Err(key_error)=>error=Some(key_error),
     },
     Err(config_error)=>error=Some(config_error),
    }
+   eprintln!("EasyInput edit model completed: session={session_id}, elapsed_ms={}",model_started.elapsed().as_millis());
   }
  }
  if error.is_none()&&!text.trim().is_empty(){let _=state.storage.add_history(text.trim(),duration_ms,source);if source=="Keyboard"{if let Err(input_error)=crate::input::type_text(text.trim()){error=Some(input_error)}}}
@@ -166,6 +183,7 @@ async fn finish_session(app:&AppHandle,session_id:&str,mut text:String,duration_
  let phase=if error.is_some(){RecordingPhase::Error}else{RecordingPhase::Idle};
  if let Ok(mut recording)=state.recording.lock(){if recording.session_id.as_deref()==Some(session_id){*recording=RecordingState{phase:phase.clone(),session_id:None,elapsed_ms:duration_ms,partial_text:text.clone(),error:message.clone()}}}
  let _=app.emit("speech-session",SessionEvent{session_id:session_id.to_owned(),phase,text,duration_ms,message});
+ eprintln!("EasyInput speech finish emitted: session={session_id}, elapsed_ms={}",finishing.elapsed().as_millis());
 }
 
 async fn handle_message(app:&AppHandle,session_id:&str,message:Message,started:Instant,latest:&mut String,replacements:&[(String,String)])->Result<bool,String>{
@@ -187,8 +205,9 @@ pub async fn open_stream(app:AppHandle,session_id:String,config:DoubaoSpeechConf
  let _=rustls::crypto::ring::default_provider().install_default();
  let request=authorized_request(&config,&token)?;
  let (mut socket,_)=tokio::time::timeout(std::time::Duration::from_secs(10),tokio_tungstenite::connect_async(request)).await.map_err(|_|"连接豆包语音服务超时（10 秒）".to_string())?.map_err(format_connect_error)?;
- socket.send(Message::Binary(initial_packet(&config)?.into())).await.map_err(|e|format!("发送豆包语音初始化请求失败：{e}"))?;
- let replacements=app.state::<crate::AppState>().storage.read_dictionary().map(|data|data.replacements).unwrap_or_default();
+ let dictionary=app.state::<crate::AppState>().storage.read_dictionary().unwrap_or_default();
+ socket.send(Message::Binary(initial_packet(&config,&dictionary.hotwords)?.into())).await.map_err(|e|format!("发送豆包语音初始化请求失败：{e}"))?;
+ let replacements=dictionary.replacements;
  let(tx,mut rx)=mpsc::unbounded_channel();
  tauri::async_runtime::spawn(async move{
   let started=Instant::now();let mut latest=String::new();let mut error=None;
@@ -206,12 +225,16 @@ pub async fn open_stream(app:AppHandle,session_id:String,config:DoubaoSpeechConf
    }
   }
   if error.is_none(){
-   let deadline=tokio::time::Instant::now()+std::time::Duration::from_secs(5);
+   // When a partial transcript already exists, the final packet normally
+   // follows immediately. A short grace period avoids a fixed five-second
+   // pause on providers that omit the final marker.
+   let final_wait=if latest.trim().is_empty(){std::time::Duration::from_secs(3)}else{std::time::Duration::from_millis(1200)};
+   let deadline=tokio::time::Instant::now()+final_wait;
    loop{match tokio::time::timeout_at(deadline,socket.next()).await{
     Ok(Some(Ok(message)))=>match handle_message(&app,&session_id,message,started,&mut latest,&replacements).await{Ok(true)=>break,Ok(false)=>continue,Err(e)=>{error=Some(e);break}},
     Ok(Some(Err(e)))=>{error=Some(format!("接收最终转写失败：{e}"));break},
     Ok(None)=>break,
-    Err(_)=>{if latest.is_empty(){error=Some("等待豆包语音最终结果超时（5 秒）".into())}break}
+    Err(_)=>{if latest.is_empty(){error=Some("等待豆包语音最终结果超时（3 秒）".into())}break}
    }}
   }
   let duration=started.elapsed().as_millis()as u64;finish_session(&app,&session_id,latest,duration,error,&source).await;
@@ -223,7 +246,8 @@ pub async fn open_stream(app:AppHandle,session_id:String,config:DoubaoSpeechConf
  use super::*;
  #[test]fn defaults_are_official_and_safe(){let c=DoubaoSpeechConfig{app_key:"demo".into(),..Default::default()};assert_eq!(c.endpoint,DOUBAO_ENDPOINT);assert_eq!(c.resource_id,"volc.bigasr.sauc.duration");assert!(validate(&c).is_ok())}
  #[test]fn rejects_credential_exfiltration_endpoint(){let c=DoubaoSpeechConfig{app_key:"demo".into(),endpoint:"wss://example.com/steal".into(),..Default::default()};assert!(validate(&c).is_err())}
- #[test]fn protocol_initial_packet_is_v1_json_gzip_with_sequence(){let c=DoubaoSpeechConfig{app_key:"demo".into(),..Default::default()};let packet=initial_packet(&c).unwrap();assert_eq!(&packet[..4],&[0x11,0x11,0x11,0]);assert_eq!(i32::from_be_bytes(packet[4..8].try_into().unwrap()),1);let size=u32::from_be_bytes(packet[8..12].try_into().unwrap())as usize;assert_eq!(size,packet.len()-12);}
+ #[test]fn protocol_initial_packet_is_v1_json_gzip_with_sequence(){let c=DoubaoSpeechConfig{app_key:"demo".into(),..Default::default()};let packet=initial_packet(&c,&[]).unwrap();assert_eq!(&packet[..4],&[0x11,0x11,0x11,0]);assert_eq!(i32::from_be_bytes(packet[4..8].try_into().unwrap()),1);let size=u32::from_be_bytes(packet[8..12].try_into().unwrap())as usize;assert_eq!(size,packet.len()-12);}
+ #[test]fn sends_dictionary_hotwords_as_serialized_context(){let c=DoubaoSpeechConfig{app_key:"demo".into(),..Default::default()};let packet=initial_packet(&c,&[" EasyInput ".into(),"豆包语音".into(),"EasyInput".into()]).unwrap();let mut decoder=GzDecoder::new(&packet[12..]);let mut payload=Vec::new();decoder.read_to_end(&mut payload).unwrap();let request:serde_json::Value=serde_json::from_slice(&payload).unwrap();let context=request.pointer("/request/context").and_then(|value|value.as_str()).unwrap();let context:serde_json::Value=serde_json::from_str(context).unwrap();assert_eq!(context["hotwords"],serde_json::json!([{"word":"EasyInput"},{"word":"豆包语音"}]));}
  #[test]fn parses_gzip_server_transcript(){let json=serde_json::json!({"result":[{"text":"你好 EasyInput","utterances":[{"definite":true}]}]});let payload=gzip(&serde_json::to_vec(&json).unwrap()).unwrap();let mut raw=vec![0x11,0x93,0x11,0];raw.extend_from_slice(&(-7i32).to_be_bytes());raw.extend_from_slice(&(payload.len()as u32).to_be_bytes());raw.extend_from_slice(&payload);let parsed=parse_server_packet(&raw).unwrap().unwrap();assert!(parsed.is_final);assert_eq!(transcript_from_json(&parsed.json),Some(("你好 EasyInput".into(),true)));}
  #[tokio::test]
  #[ignore = "访问豆包官方端点的手动网络诊断"]

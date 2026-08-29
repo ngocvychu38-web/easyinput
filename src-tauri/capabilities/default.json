@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "EasyInput main window permissions",
-  "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-hide", "core:window:allow-show", "core:window:allow-set-focus", "dialog:allow-open", "dialog:allow-save"]
+  "description": "EasyInput main and non-focusable voice overlay permissions",
+  "windows": ["main", "voice-overlay"],
+  "permissions": ["core:default", "core:window:allow-hide", "core:window:allow-show", "core:window:allow-set-focus", "core:window:allow-set-position", "core:window:allow-set-size", "core:window:allow-set-ignore-cursor-events", "dialog:allow-open", "dialog:allow-save"]
 }

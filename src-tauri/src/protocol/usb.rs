@@ -202,6 +202,16 @@ pub fn edit_button_state(raw: &[u8]) -> Option<bool> {
     Some(right_option || legacy_chord)
 }
 
+/// Realtime voice uses the reserved Ctrl+Shift+R chord.  Unlike voice/edit
+/// PTT it is a toggle action, so the host only acts on the pressed edge.
+/// Dedicated App Command reports are parsed separately by `app_command`.
+pub fn realtime_button_state(raw: &[u8]) -> Option<bool> {
+    if raw.len() < 2 || raw[0] != REPORT_KEYBOARD { return None; }
+    let ctrl_shift = raw[1] & 0x03 == 0x03;
+    let r_key = raw.get(3..).is_some_and(|keys| keys.contains(&0x15));
+    Some(ctrl_shift && r_key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +278,12 @@ mod tests {
         assert_eq!(edit_button_state(&[REPORT_KEYBOARD, 0x40, 0, 0]), Some(true));
         assert_eq!(edit_button_state(&[REPORT_KEYBOARD, 0x03, 0, 0x08, 0, 0, 0, 0, 0]), Some(true));
         assert_eq!(edit_button_state(&[REPORT_KEYBOARD, 0, 0, 0, 0, 0, 0, 0, 0]), Some(false));
+    }
+
+    #[test]
+    fn parses_keyboard_realtime_toggle() {
+        assert_eq!(realtime_button_state(&[REPORT_KEYBOARD, 0x03, 0, 0x15, 0, 0, 0, 0, 0]), Some(true));
+        assert_eq!(realtime_button_state(&[REPORT_KEYBOARD, 0, 0, 0, 0, 0, 0, 0, 0]), Some(false));
+        assert_eq!(realtime_button_state(&[REPORT_KEYBOARD, 0x03, 0, 0x08, 0, 0, 0, 0, 0]), Some(false));
     }
 }

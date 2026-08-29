@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AudioLines, CircleHelp, Settings, UserRound } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getRuntimeSnapshot } from "./api";
-import type { HardwareEditButtonEvent, HardwareRealtimeButtonEvent, HardwareVoiceButtonEvent, RuntimeSnapshot } from "./types";
+import type { HardwareRealtimeButtonEvent, RuntimeSnapshot } from "./types";
 import { OverviewPage } from "./pages/OverviewPage";
 import { VoicePage } from "./pages/VoicePage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -25,8 +25,6 @@ export default function App() {
   const [page, setPage] = useState<PageId>("overview");
   const [runtime, setRuntime] = useState<RuntimeSnapshot>();
   const [error, setError] = useState<string>();
-  const [hardwareTrigger, setHardwareTrigger] = useState<HardwareVoiceButtonEvent>();
-  const [hardwareEditTrigger, setHardwareEditTrigger] = useState<HardwareEditButtonEvent>();
   const [hardwareRealtimeTrigger, setHardwareRealtimeTrigger] = useState<HardwareRealtimeButtonEvent>();
   const [onboarding, setOnboarding] = useState(() => localStorage.getItem("easyinput.onboarding.completed") !== "1");
 
@@ -34,13 +32,26 @@ export default function App() {
     try { setRuntime(await getRuntimeSnapshot()); setError(undefined); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      await refresh();
+      if (!stopped) timer = window.setTimeout(poll, 2_000);
+    };
+    const refreshOnFocus = () => { void refresh(); };
+    void poll();
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, []);
   useEffect(() => {
     let disposed = false;
     const unlisteners: UnlistenFn[] = [];
     void Promise.all([
-      listen<HardwareVoiceButtonEvent>("hardware-voice-button", event => { setHardwareTrigger(event.payload); setPage("voice"); }),
-      listen<HardwareEditButtonEvent>("hardware-edit-button", event => { setHardwareEditTrigger(event.payload); setPage("voice"); }),
       listen<HardwareRealtimeButtonEvent>("hardware-realtime-button", event => { setHardwareRealtimeTrigger(event.payload); setPage("call"); })
     ]).then(values => disposed ? values.forEach(value=>value()) : unlisteners.push(...values));
     return () => { disposed = true; unlisteners.forEach(value=>value()); };
@@ -51,7 +62,7 @@ export default function App() {
     const props = { runtime, refresh };
     switch (page) {
       case "overview": return <OverviewPage {...props} navigate={target=>setPage(target)} />;
-      case "voice": return <VoicePage {...props} hardwareTrigger={hardwareTrigger} hardwareEditTrigger={hardwareEditTrigger} />;
+      case "voice": return <VoicePage {...props} />;
       case "call": return <RealtimeCallPage hardwareTrigger={hardwareRealtimeTrigger} openSettings={() => setPage("speechConfig")} />;
       case "history": return <HistoryPage />;
       case "dictionary": return <DictionaryPage />;
@@ -61,7 +72,7 @@ export default function App() {
       case "account": return <AccountPage />;
       case "help": return <HelpPage runtime={runtime} />;
     }
-  }, [page, runtime, hardwareTrigger, hardwareEditTrigger, hardwareRealtimeTrigger]);
+  }, [page, runtime, hardwareRealtimeTrigger]);
 
   return <div className="app-shell">
     {onboarding && <Onboarding onComplete={() => { localStorage.setItem("easyinput.onboarding.completed", "1"); setOnboarding(false); }} />}

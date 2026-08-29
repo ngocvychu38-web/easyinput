@@ -16,6 +16,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const SPEAKER_FRAME_BYTES: usize = 960;
 const SPEAKER_FRAME_DURATION: Duration = Duration::from_millis(20);
+// The board normally uploads one 20 ms frame at a time. If that stream pauses,
+// explicitly mute the cloud input so the service does not treat the gap as a
+// dead audio source. The next board frame resumes the cloud input first.
+const INPUT_AUDIO_MUTE_AFTER: Duration = Duration::from_secs(1);
 
 type RealtimeSocket = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -107,9 +111,28 @@ fn text_message(value: serde_json::Value) -> Result<Message, String> {
 }
 
 fn event_error(value: &serde_json::Value) -> String {
-    let code = value.pointer("/error/code").or_else(|| value.get("status_code")).and_then(|value| value.as_i64());
+    let code = value.pointer("/error/code").or_else(|| value.get("status_code")).and_then(|value| {
+        value.as_str().map(str::to_owned).or_else(|| value.as_i64().map(|value| value.to_string()))
+    });
     let message = value.pointer("/error/message").or_else(|| value.get("message")).and_then(|value| value.as_str()).unwrap_or("未知错误");
-    match code { Some(code) => format!("豆包实时语音错误（{code}）：{message}"), None => format!("豆包实时语音错误：{message}") }
+    let mut result = match code.as_deref() {
+        Some(code) => format!("豆包实时语音错误（{code}）：{message}"),
+        None => format!("豆包实时语音错误：{message}"),
+    };
+    if code.as_deref() == Some("52000033")
+        || message.contains("52000033")
+        || message.contains("AudioServerNoAudioInputTooLongError")
+    {
+        result.push_str("。开发板音频上传中断时间过长；请确认开发板仍在线后重新开始通话");
+    }
+    result
+}
+
+fn input_audio_state_event(event_type: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": event_type,
+        "event_id": format!("event-{}", uuid::Uuid::new_v4())
+    })
 }
 
 async fn connect_and_create(config: &RealtimeVoiceConfig, api_key: &str, session_id: &str) -> Result<(RealtimeSocket, Option<String>), String> {
@@ -258,6 +281,8 @@ pub async fn open_session(app: AppHandle, session_id: String, config: RealtimeVo
         speaker_tick.tick().await;
         let mut keepalive = tokio::time::interval(Duration::from_secs(1));
         let mut state_tick = tokio::time::interval(Duration::from_millis(250));
+        let mut last_input_audio_at = Instant::now();
+        let mut cloud_input_muted = false;
         let mut terminal_error: Option<String> = None;
         let mut graceful_close = false;
         let mut close_deadline: Option<tokio::time::Instant> = None;
@@ -282,8 +307,16 @@ pub async fn open_session(app: AppHandle, session_id: String, config: RealtimeVo
                     Ok((size, source)) if source.ip() == peer.ip() && close_deadline.is_none() => {
                         if let Ok(packet) = audio::parse_audio(&udp_buffer[..size]) {
                             if packet.session_id == wire_session {
+                                if cloud_input_muted {
+                                    if let Err(error) = writer.send(text_message(input_audio_state_event("input_audio_unmute.commit")).unwrap()).await {
+                                        terminal_error = Some(format!("恢复豆包音频输入失败：{error}"));
+                                        break;
+                                    }
+                                    cloud_input_muted = false;
+                                }
                                 let event = serde_json::json!({"type":"input_audio_buffer.append","event_id":format!("event-{}",uuid::Uuid::new_v4()),"audio":BASE64.encode(packet.payload)});
                                 if let Err(error) = writer.send(text_message(event).unwrap()).await { terminal_error = Some(format!("上传开发板音频失败：{error}")); break; }
+                                last_input_audio_at = Instant::now();
                                 update_state(&app, |state| state.input_packets += 1);
                             }
                         }
@@ -348,6 +381,13 @@ pub async fn open_session(app: AppHandle, session_id: String, config: RealtimeVo
                     if close_deadline.is_none() {
                         control_sequence = control_sequence.wrapping_add(1);
                         let _ = udp.send_to(&audio::control_packet(ControlAction::Keepalive, wire_session, control_sequence), peer).await;
+                        if !cloud_input_muted && last_input_audio_at.elapsed() >= INPUT_AUDIO_MUTE_AFTER {
+                            if let Err(error) = writer.send(text_message(input_audio_state_event("input_audio_mute.commit")).unwrap()).await {
+                                terminal_error = Some(format!("暂停豆包音频输入失败：{error}"));
+                                break;
+                            }
+                            cloud_input_muted = true;
+                        }
                     }
                 },
                 _ = state_tick.tick() => update_state(&app, |state| state.elapsed_ms = started.elapsed().as_millis() as u64),
@@ -417,5 +457,25 @@ mod tests {
         let request = authorized_request(&config, "  raw-key  ").unwrap();
         assert_eq!(request.headers()["X-Api-Key"], "raw-key");
         assert!(authorized_request(&config, "Bearer raw-key").unwrap_err().contains("不要添加 Bearer"));
+    }
+
+    #[test]
+    fn explains_no_audio_timeout_and_accepts_string_error_code() {
+        let event = serde_json::json!({
+            "type": "error",
+            "error": {
+                "code": "52000033",
+                "message": "AudioServerNoAudioInputTooLongError"
+            }
+        });
+        let message = event_error(&event);
+        assert!(message.contains("52000033"));
+        assert!(message.contains("开发板音频上传中断时间过长"));
+    }
+
+    #[test]
+    fn builds_official_audio_mute_and_unmute_events() {
+        assert_eq!(input_audio_state_event("input_audio_mute.commit")["type"], "input_audio_mute.commit");
+        assert_eq!(input_audio_state_event("input_audio_unmute.commit")["type"], "input_audio_unmute.commit");
     }
 }

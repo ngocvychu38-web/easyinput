@@ -80,7 +80,10 @@ export function VoicePage({ runtime, refresh, hardwareTrigger, hardwareEditTrigg
     phaseRef.current = "Draining";
     setPhase("Draining");
     stopLocalCapture();
-    await sendChain.current;
+    await Promise.race([
+      sendChain.current,
+      new Promise<void>(resolve => window.setTimeout(resolve, 600))
+    ]);
     const result = await stopRecording(current);
     if (!result.ok) {
       setError(result.message ?? "结束转写失败");
@@ -192,7 +195,7 @@ export function VoicePage({ runtime, refresh, hardwareTrigger, hardwareEditTrigg
   useEffect(() => {
     if (!hardwareEditTrigger || handledEditSequence.current === hardwareEditTrigger.sequence) return;
     handledEditSequence.current = hardwareEditTrigger.sequence;
-    setEditHasSelection(hardwareEditTrigger.hasSelection);
+    if (hardwareEditTrigger.pressed) setEditHasSelection(hardwareEditTrigger.hasSelection);
     const toggle = runtime.keyboardConfig.pttMode === "Toggle";
     if (toggle) {
       if (!hardwareEditTrigger.pressed) return;

@@ -12,6 +12,7 @@
   "app": {
     "withGlobalTauri": false,
     "windows": [{
+      "label": "main",
       "title": "EasyInput",
       "width": 1200,
       "height": 800,
@@ -22,6 +23,23 @@
       "fullscreen": false,
       "titleBarStyle": "Visible",
       "hiddenTitle": true
+    }, {
+      "label": "voice-overlay",
+      "title": "EasyInput Voice Overlay",
+      "url": "index.html?window=voice-overlay",
+      "width": 700,
+      "height": 160,
+      "resizable": false,
+      "fullscreen": false,
+      "decorations": false,
+      "transparent": true,
+      "shadow": false,
+      "alwaysOnTop": true,
+      "visibleOnAllWorkspaces": true,
+      "skipTaskbar": true,
+      "visible": false,
+      "focus": false,
+      "focusable": false
     }],
     "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://easyinput.pro wss://easyinput.pro wss://openspeech.bytedance.com https://docs.volcengine.com; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'" }
   },

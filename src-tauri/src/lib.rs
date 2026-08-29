@@ -18,10 +18,15 @@ use storage::Storage;
 use tauri::{Emitter, Manager};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-pub struct AppState { storage: Storage, recording: Mutex<RecordingState>, speech_sessions:Mutex<HashMap<String,tokio::sync::mpsc::UnboundedSender<speech::StreamCommand>>>, speech_token:Mutex<Option<String>>, ark_api_key:Mutex<Option<String>>, realtime_api_key:Mutex<Option<String>>, realtime_call:Mutex<RealtimeCallState>, realtime_session:Mutex<Option<tokio::sync::mpsc::UnboundedSender<realtime::RealtimeCommand>>>, edit_context:Mutex<Option<String>>, device: DeviceManager }
-impl AppState { fn new(storage:Storage)->Self{Self{storage,recording:Mutex::new(RecordingState{phase:RecordingPhase::Idle,session_id:None,elapsed_ms:0,partial_text:String::new(),error:None}),speech_sessions:Mutex::new(HashMap::new()),speech_token:Mutex::new(None),ark_api_key:Mutex::new(None),realtime_api_key:Mutex::new(None),realtime_call:Mutex::new(RealtimeCallState::default()),realtime_session:Mutex::new(None),edit_context:Mutex::new(None),device:DeviceManager::new()}} }
+pub struct AppState { storage: Storage, recording: Mutex<RecordingState>, speech_sessions:Mutex<HashMap<String,tokio::sync::mpsc::UnboundedSender<speech::StreamCommand>>>, speech_token:Mutex<Option<String>>, ark_api_key:Mutex<Option<String>>, realtime_api_key:Mutex<Option<String>>, realtime_call:Mutex<RealtimeCallState>, realtime_session:Mutex<Option<tokio::sync::mpsc::UnboundedSender<realtime::RealtimeCommand>>>, pending_edit_context:Mutex<Option<String>>, edit_contexts:Mutex<HashMap<String,String>>, device: DeviceManager }
+impl AppState { fn new(storage:Storage)->Self{Self{storage,recording:Mutex::new(RecordingState{phase:RecordingPhase::Idle,session_id:None,elapsed_ms:0,partial_text:String::new(),error:None}),speech_sessions:Mutex::new(HashMap::new()),speech_token:Mutex::new(None),ark_api_key:Mutex::new(None),realtime_api_key:Mutex::new(None),realtime_call:Mutex::new(RealtimeCallState::default()),realtime_session:Mutex::new(None),pending_edit_context:Mutex::new(None),edit_contexts:Mutex::new(HashMap::new()),device:DeviceManager::new()}} }
 
-pub(crate) fn set_edit_context(app:&tauri::AppHandle,selection:Option<String>){let state=app.state::<AppState>();if let Ok(mut context)=state.edit_context.lock(){*context=selection;};}
+pub(crate) fn capture_edit_context(app:&tauri::AppHandle)->bool{
+ let selection=match input::selected_text(){Ok(value)=>value.filter(|text|!text.trim().is_empty()),Err(error)=>{eprintln!("EasyInput selection capture failed: {error}");None}};
+ let present=selection.is_some();
+ eprintln!("EasyInput edit selection captured: present={present}, chars={}",selection.as_ref().map(|text|text.chars().count()).unwrap_or(0));
+ let state=app.state::<AppState>();if let Ok(mut context)=state.pending_edit_context.lock(){*context=selection;};present
+}
 
 pub(crate) fn execute_host_action(app:&tauri::AppHandle,id:&str)->Result<(),String>{
  let canonical=uuid::Uuid::parse_str(id).map_err(|_|"设备发回了无效的主机动作标识")?.hyphenated().to_string().to_lowercase();
@@ -56,10 +61,15 @@ async fn start_recording(app:tauri::AppHandle,state:tauri::State<'_,AppState>,so
  if source=="KeyboardEdit"&&!persisted.ark.enabled{return Ok(OperationResult::failure("请先在“语音服务配置”中启用火山方舟文本模型"))}
  if source=="KeyboardEdit"&&!persisted.ark.api_key_saved{return Ok(OperationResult::failure("请先在“语音服务配置”中保存火山方舟 API Key"))}
  if source.starts_with("Keyboard")&&!input::request_text_input_access(){return Ok(OperationResult::failure("请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 EasyInput，然后再次按下语音键"))}
+ let edit_context=if source=="KeyboardEdit"{
+  let pending=state.pending_edit_context.lock().ok().and_then(|mut value|value.take());
+  pending.or_else(||input::selected_text().ok().flatten()).filter(|value|!value.trim().is_empty())
+ }else{None};
  let session_id=uuid::Uuid::new_v4().to_string();
  {let mut recording=state.recording.lock().map_err(|_|"录音状态锁已损坏")?;if !matches!(recording.phase,RecordingPhase::Idle|RecordingPhase::Error){return Ok(OperationResult::failure("已有录音会话正在进行"))}*recording=RecordingState{phase:RecordingPhase::Preparing,session_id:Some(session_id.clone()),elapsed_ms:0,partial_text:String::new(),error:None};}
- let token=match read_speech_token(state.inner()).await{Ok(v)=>v,Err(e)=>{if let Ok(mut recording)=state.recording.lock(){*recording=RecordingState{phase:RecordingPhase::Error,session_id:None,elapsed_ms:0,partial_text:String::new(),error:Some(e.clone())}}return Ok(OperationResult::failure(e))}};
- let sender=match speech::open_stream(app,session_id.clone(),config,token,source.into()).await{Ok(v)=>v,Err(e)=>{if let Ok(mut recording)=state.recording.lock(){*recording=RecordingState{phase:RecordingPhase::Error,session_id:None,elapsed_ms:0,partial_text:String::new(),error:Some(e.clone())}}return Ok(OperationResult::failure(e))}};
+ if let Some(context)=edit_context{state.edit_contexts.lock().map_err(|_|"语音编辑上下文锁已损坏")?.insert(session_id.clone(),context);}
+ let token=match read_speech_token(state.inner()).await{Ok(v)=>v,Err(e)=>{if let Ok(mut contexts)=state.edit_contexts.lock(){contexts.remove(&session_id);}if let Ok(mut recording)=state.recording.lock(){*recording=RecordingState{phase:RecordingPhase::Error,session_id:None,elapsed_ms:0,partial_text:String::new(),error:Some(e.clone())}}return Ok(OperationResult::failure(e))}};
+ let sender=match speech::open_stream(app,session_id.clone(),config,token,source.into()).await{Ok(v)=>v,Err(e)=>{if let Ok(mut contexts)=state.edit_contexts.lock(){contexts.remove(&session_id);}if let Ok(mut recording)=state.recording.lock(){*recording=RecordingState{phase:RecordingPhase::Error,session_id:None,elapsed_ms:0,partial_text:String::new(),error:Some(e.clone())}}return Ok(OperationResult::failure(e))}};
  state.speech_sessions.lock().map_err(|_|"语音会话锁已损坏")?.insert(session_id.clone(),sender);
  if let Ok(mut recording)=state.recording.lock(){recording.phase=RecordingPhase::Recording;}
  Ok(OperationResult::success(Some(SessionStart{session_id})))
@@ -77,6 +87,7 @@ fn push_recording_audio(state:tauri::State<AppState>,session_id:String,samples:V
 
 #[tauri::command]
 fn stop_recording(state:tauri::State<AppState>,session_id:String)->OperationResult<()>{
+ eprintln!("EasyInput stop recording received: session={session_id}");
  {let mut recording=match state.recording.lock(){Ok(v)=>v,Err(_)=>return OperationResult::failure("录音状态锁已损坏")};if recording.session_id.as_deref()!=Some(&session_id){return OperationResult::failure("录音会话已过期，已忽略停止结果")};recording.phase=RecordingPhase::Draining;}
  let sender=match state.speech_sessions.lock().ok().and_then(|sessions|sessions.get(&session_id).cloned()){Some(v)=>v,None=>return OperationResult::failure("豆包语音会话不存在")};
  match sender.send(speech::StreamCommand::Finish){Ok(_)=>OperationResult::success(None),Err(_)=>OperationResult::failure("豆包语音会话已结束")}

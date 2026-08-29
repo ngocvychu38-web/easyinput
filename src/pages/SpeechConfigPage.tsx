@@ -46,7 +46,7 @@ export function SpeechConfigPage() {
       setRealtimeStatus(`连接成功${savedMessage}，模型 ${result.data.model}，耗时 ${result.data.latencyMs} ms。${result.data.logId?` LogID：${result.data.logId}`:""}`);
     }catch(reason){setRealtimeStatus(`连接失败：${formatOperationError(reason)}`)}finally{setTestingRealtime(false)}
   };
-  return <div className="page speech-config-page"><div className="speech-config-title"><div><SectionLabel index="01">语音识别服务</SectionLabel><h1>豆包语音识别</h1><p>使用火山引擎大模型流式语音识别，将 16 kHz 单声道 PCM 实时转换为文字。</p></div><div className="provider-badge"><Waves/><span><b>豆包语音</b><small>大模型流式识别</small></span></div></div>
+  return <div className="page speech-config-page"><section className="speech-provider-section"><div className="speech-config-title"><div><SectionLabel index="01">语音识别服务</SectionLabel><h1>豆包语音识别</h1><p>使用火山引擎大模型流式语音识别，将 16 kHz 单声道 PCM 实时转换为文字。</p></div><div className="provider-badge"><Waves/><span><b>豆包语音</b><small>大模型流式识别</small></span></div></div>
     <div className="speech-config-grid"><section><SectionLabel index="02">服务与鉴权</SectionLabel>
       <SettingRow title="启用豆包语音识别" hint="关闭后不会向云端发送音频" action={<Toggle label="启用豆包语音" value={config.enabled} onChange={v=>patch("enabled",v)}/>}/>
       <label>App Key<span>来自豆包语音控制台的 APP ID / App Key</span><input value={config.appKey} onChange={e=>patch("appKey",e.target.value.trim())} placeholder="请输入 App Key" autoComplete="off"/></label>
@@ -61,6 +61,7 @@ export function SpeechConfigPage() {
       <div className="audio-contract"><b>音频传输格式</b><dl><div><dt>采样率</dt><dd>16 kHz</dd></div><div><dt>声道</dt><dd>单声道</dd></div><div><dt>编码</dt><dd>PCM S16LE</dd></div><div><dt>分片</dt><dd>约 200 ms</dd></div></dl></div>
       <div className="privacy-notice"><LockKeyhole/><p><b>数据说明</b><br/>启用后，录音会发送到火山引擎进行识别。本机历史、设置和 Access Token 不会同步到 EasyInput 自有服务器。</p></div>
     </section></div>
+    <div className="save-bar"><a href="https://docs.volcengine.com/docs/6561/2630027?lang=zh" target="_blank" rel="noreferrer">打开官方文档 <ExternalLink/></a><span>{status}</span><Button onClick={test} disabled={testing||!config.appKey}>{testing?"测试中…":"测试连接"}</Button><Button kind="primary" onClick={save}>保存配置</Button></div></section>
     <section className="soft-panel ark-model-panel"><div className="speech-config-title"><div><SectionLabel index="04">语音编辑模型</SectionLabel><h2>火山方舟文本模型</h2><p>语音编辑会把语音转写作为问题；存在选中文本时将其作为上下文，并用模型回答替换选区。</p></div><div className="provider-badge"><Bot/><span><b>火山方舟</b><small>Responses API</small></span></div></div>
       <SettingRow title="启用语音编辑" hint="开关变更会立即保存；关闭后语音输入仍可使用" action={<Toggle label="启用方舟模型" value={ark.enabled} onChange={value=>void toggleArk(value)}/>}/>
       <div className="speech-config-grid"><label>模型 ID<span>填写方舟控制台中已开通的模型 ID 或推理接入点 ID</span><input value={ark.model} onChange={event=>patchArk("model",event.target.value.trim())} placeholder="doubao-seed-2-0-lite-260215" autoComplete="off"/></label>
@@ -87,6 +88,5 @@ export function SpeechConfigPage() {
       <div className="audio-contract"><b>硬件实时音频合同</b><dl><div><dt>开发板上行</dt><dd>16 kHz PCM S16LE</dd></div><div><dt>豆包下行</dt><dd>24 kHz PCM S16LE</dd></div><div><dt>单帧</dt><dd>20 ms</dd></div><div><dt>模式</dt><dd>全双工 / 可打断</dd></div></dl></div>
       <div className="save-bar"><a href="https://docs.volcengine.com/docs/6561/2549778?lang=zh" target="_blank" rel="noreferrer">打开全双工接口文档 <ExternalLink/></a><span>{realtimeStatus}</span><Button onClick={testRealtime} disabled={testingRealtime}>{testingRealtime?"测试中…":"测试实时会话"}</Button><Button kind="primary" onClick={saveRealtime}>保存实时语音配置</Button></div>
     </section>
-    <div className="save-bar"><a href="https://docs.volcengine.com/docs/6561/1354869?lang=zh" target="_blank" rel="noreferrer">打开官方文档 <ExternalLink/></a><span>{status}</span><Button onClick={test} disabled={testing||!config.appKey}>{testing?"测试中…":"测试连接"}</Button><Button kind="primary" onClick={save}>保存配置</Button></div>
   </div>;
 }
