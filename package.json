@@ -13,7 +13,9 @@
     "tauri:dev": "bash scripts/dev.sh",
     "tauri:build:debug:app": "tauri build --debug --bundles app && bash scripts/sign-local-app.sh",
     "tauri:build:intel": "tauri build --target x86_64-apple-darwin",
-    "verify:intel": "bash scripts/verify-intel.sh"
+    "verify:intel": "bash scripts/verify-intel.sh",
+    "live:dev": "bash scripts/live-dev.sh",
+    "cube:dev": "bash scripts/cube-dev.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

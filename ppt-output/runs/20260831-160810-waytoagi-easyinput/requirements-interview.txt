@@ -1,0 +1,21 @@
+presentation_requirements:
+- scenario: WaytoAGI 第七期 AI 训练营内部项目经验分享
+- audience: 对 AI 应用开发感兴趣、技术背景不完全一致的训练营学员
+- target_action: 听懂 EasyInput 的真实实现过程，并能带走一套可复用的人机协作方法
+- expected_pages: 约 12 页，适配 15 分钟左右分享
+- page_density: 均衡图文；个人故事页偏低密，技术流程页中等密度
+- style: 轻量科技感、真实克制、个人项目复盘
+- brand: 延续 EasyInput 简洁界面气质，无强制品牌资产
+- must_include: Intel Mac 起因；业务架构；技术架构；实时语音全链路；ASR-LLM-TTS 与端到端实时语音的取舍；打断；Function Calling；本地确定性路由；打开微信、剪映和 Codex 等应用；火山引擎示例上下行标注踩坑；回声和稳定性排查；人与 AI 的分工
+- must_avoid: 不夸大自主研发程度；不虚构数据；不堆协议字段；不把 AI 描述成无需人判断和验收
+- language: 中文，大白话，第一人称演讲口吻
+- imagery: 真实界面截图、流程图和少量装饰元素
+- material_strategy: local_only
+- subagent_model_strategy: 继承主代理
+- subagent_thinking_effort: 中等
+- manual_audit_mode: milestone_only
+- manual_audit_scope: Markdown 内容与最终 HTML 图审
+- manual_audit_assets: summary_only
+- density_bias: balanced
+- 分支：非research
+- narrative_direction: 以“Intel Mac 用不了，于是自己补一个”为故事主线；按个人刚需、方案选择、打通链路、语音调用、连续排障、经验总结展开。技术细节服务于故事，不做产品宣讲或商业包装。

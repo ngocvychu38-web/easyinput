@@ -41,7 +41,7 @@
       "focus": false,
       "focusable": false
     }],
-    "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://easyinput.pro wss://easyinput.pro wss://openspeech.bytedance.com https://docs.volcengine.com; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'" }
+    "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://easyinput.pro wss://easyinput.pro wss://openspeech.bytedance.com https://docs.volcengine.com; frame-src http://localhost:3002 http://localhost:3000 http://127.0.0.1:3000 http://localhost:3001 http://127.0.0.1:3001 http://localhost:8787 http://127.0.0.1:8787; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'" }
   },
   "bundle": {
     "active": true,

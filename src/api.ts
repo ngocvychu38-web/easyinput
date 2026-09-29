@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ActivityDay, AppSettings, ArkConnectionTest, ArkModelConfig, DictionaryData, DictionaryExport, DictionaryImport, DoubaoConnectionTest, DoubaoSpeechConfig, HistoryEntry, InstalledApplication, KeyboardConfig, OperationResult, RealtimeCallState, RealtimeConnectionTest, RealtimeVoiceConfig, RuntimeSnapshot, WifiScanResult } from "./types";
+import type { ActivityDay, AppSettings, ArkConnectionTest, ArkModelConfig, DictionaryData, DictionaryExport, DictionaryImport, DoubaoConnectionTest, DoubaoSpeechConfig, HistoryEntry, InstalledApplication, KeyboardConfig, McdMcpConfig, McdMcpConnectionTest, OperationResult, PaymentMvpLaunch, RealtimeCallState, RealtimeConnectionTest, RealtimeDiagnosticsInfo, RealtimeVoiceConfig, RuntimeSnapshot, VoiceActionsConfig, WifiScanResult } from "./types";
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 let mockSnapshot: RuntimeSnapshot | undefined;
@@ -113,11 +113,60 @@ export async function testRealtimeVoiceConnection(config: RealtimeVoiceConfig, a
 }
 export async function getRealtimeCallState(): Promise<RealtimeCallState> {
   if (inTauri()) return invoke<RealtimeCallState>("get_realtime_call_state");
-  return { phase: "Idle", userText: "", assistantText: "", elapsedMs: 0, inputPackets: 0, outputPackets: 0 };
+  return { phase: "Idle", userText: "", assistantText: "", elapsedMs: 0, inputPackets: 0, outputPackets: 0, toolCallCount: 0 };
 }
-export async function startRealtimeCall() { return inTauri() ? invoke<OperationResult<{sessionId:string}>>("start_realtime_call") : { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式不能连接开发板" } as OperationResult<{sessionId:string}>; }
+export async function getRealtimeDiagnosticsInfo(): Promise<RealtimeDiagnosticsInfo> {
+  return inTauri() ? invoke<RealtimeDiagnosticsInfo>("get_realtime_diagnostics_info") : { path: "实时语音诊断日志仅在客户端中生成", bytes: 0 };
+}
+export async function exportRealtimeDiagnostics(path: string) {
+  return inTauri() ? invoke<OperationResult<RealtimeDiagnosticsInfo>>("export_realtime_diagnostics", { path }) : { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式没有本地诊断日志" } as OperationResult<RealtimeDiagnosticsInfo>;
+}
+export async function startRealtimeCall(wakeWordMode = false) { return inTauri() ? invoke<OperationResult<{sessionId:string}>>("start_realtime_call", { wakeWordMode }) : { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式不能连接开发板" } as OperationResult<{sessionId:string}>; }
 export async function stopRealtimeCall() { return invokeMaybe<OperationResult>("stop_realtime_call"); }
 export async function interruptRealtimeCall() { return invokeMaybe<OperationResult>("interrupt_realtime_call"); }
+export async function setRealtimeWakeWordMode(enabled: boolean) {
+  return inTauri() ? invoke<OperationResult>("set_realtime_wake_word_mode", { enabled }) : { operationId: crypto.randomUUID(), ok: false, message: "浏览器预览模式不能更改实时语音待命状态" } as OperationResult;
+}
+export async function launchPaymentMvp(payH5Url: string) {
+  if (inTauri()) return invoke<OperationResult<PaymentMvpLaunch>>("launch_payment_mvp", { payH5Url });
+  return { operationId: crypto.randomUUID(), ok: false, message: "请在 EasyInput macOS 客户端中打开支付验证页" } as OperationResult<PaymentMvpLaunch>;
+}
+export async function getMcdMcpConfig() {
+  if (inTauri()) return invoke<McdMcpConfig>("get_mcd_mcp_config");
+  const { DEFAULT_MCD_MCP_CONFIG } = await import("./types");
+  const saved = localStorage.getItem("easyinput.mcd-mcp.config");
+  return saved ? { ...DEFAULT_MCD_MCP_CONFIG, ...JSON.parse(saved) } : DEFAULT_MCD_MCP_CONFIG;
+}
+export async function saveMcdMcpConfig(config: McdMcpConfig, token?: string) {
+  if (inTauri()) return invoke<OperationResult<McdMcpConfig>>("save_mcd_mcp_config", { config, token: token || null });
+  const next = { ...config, tokenSaved: Boolean(token) || config.tokenSaved };
+  localStorage.setItem("easyinput.mcd-mcp.config", JSON.stringify(next));
+  return { operationId: crypto.randomUUID(), ok: true, data: next } as OperationResult<McdMcpConfig>;
+}
+export async function getCubeModelKeys(): Promise<{ jev: string | null; deepseek: string | null }> {
+  if (inTauri()) return invoke("get_cube_model_keys");
+  return { jev: null, deepseek: null };
+}
+export async function saveCubeModelKey(provider: "jev" | "deepseek", key: string): Promise<OperationResult> {
+  if (inTauri()) return invoke("save_cube_model_key", { provider, key });
+  return { operationId: crypto.randomUUID(), ok: false, message: "请在 EasyInput macOS 客户端中保存魔方模型密钥" };
+}
+export async function testMcdMcpConnection(config: McdMcpConfig, token?: string) {
+  if (inTauri()) return invoke<OperationResult<McdMcpConnectionTest>>("test_mcd_mcp_connection", { config, token: token || null });
+  return { operationId: crypto.randomUUID(), ok: false, message: "请在 EasyInput macOS 客户端中测试 MCP 鉴权" } as OperationResult<McdMcpConnectionTest>;
+}
+export async function getVoiceActionsConfig(): Promise<VoiceActionsConfig> {
+  if (inTauri()) return invoke<VoiceActionsConfig>("get_voice_actions_config");
+  const { DEFAULT_VOICE_ACTIONS_CONFIG } = await import("./types");
+  const saved = localStorage.getItem("easyinput.voice-actions.config");
+  return saved ? { ...DEFAULT_VOICE_ACTIONS_CONFIG, ...JSON.parse(saved) } : DEFAULT_VOICE_ACTIONS_CONFIG;
+}
+export async function saveVoiceActionsConfig(config: VoiceActionsConfig) {
+  if (inTauri()) return invoke<OperationResult<VoiceActionsConfig>>("save_voice_actions_config", { config });
+  const next = { ...config, revision: config.revision + 1 };
+  localStorage.setItem("easyinput.voice-actions.config", JSON.stringify(next));
+  return { operationId: crypto.randomUUID(), ok: true, data: next } as OperationResult<VoiceActionsConfig>;
+}
 
 async function invokeMaybe<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (inTauri()) return invoke<T>(command, args);

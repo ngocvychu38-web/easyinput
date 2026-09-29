@@ -8,3 +8,6 @@ src-tauri/target/
 !.env.example
 .firecrawl/
 screenshots.7z
+
+# Local presentation build and validation staging
+.codex-ppt/

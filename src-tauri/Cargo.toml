@@ -31,6 +31,7 @@ futures-util = "0.3"
 flate2 = "1"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 base64 = "0.22"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 hidapi = { version = "2.6", default-features = false, features = ["macos-shared-device"] }

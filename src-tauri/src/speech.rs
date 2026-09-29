@@ -253,3 +253,91 @@ pub async fn open_stream(app:AppHandle,session_id:String,config:DoubaoSpeechConf
  #[ignore = "访问豆包官方端点的手动网络诊断"]
  async fn official_endpoint_probe_returns_within_timeout(){let c=DoubaoSpeechConfig{app_key:"invalid-probe".into(),..Default::default()};let started=std::time::Instant::now();let result=test_connection(&c,"invalid-probe").await;println!("probe elapsed={:?} ok={} message={:?}",started.elapsed(),result.ok,result.message);assert!(started.elapsed()<std::time::Duration::from_secs(15));assert!(!result.ok)}
 }
+
+/// Streaming captions deliberately bypass dictation state/history and input injection.
+pub struct Caption { pub id: String, pub text: String, pub definite: bool }
+fn captions(value: &serde_json::Value, segment: u64) -> Vec<Caption> {
+ let result = value.pointer("/result/0").or_else(|| value.get("result")).or_else(|| value.pointer("/payload/result/0")).or_else(|| value.get("payload"));
+ let Some(result) = result else { return vec![]; };
+ if let Some(utterances) = result.get("utterances").and_then(|v| v.as_array()).filter(|v| !v.is_empty()) {
+  return utterances.iter().enumerate().filter_map(|(index, utterance)| {
+   let text = utterance.get("text")?.as_str()?.trim();
+   if text.is_empty() { return None; }
+   let position = utterance.get("start_time").and_then(|v| v.as_u64()).unwrap_or(index as u64);
+   Some(Caption { id: format!("{segment}:{position}"), text: text.into(), definite: utterance.get("definite").and_then(|v| v.as_bool()).unwrap_or(false) })
+  }).collect();
+ }
+ // Providers without utterances can still render captions, but never execute uncertain commands.
+ result.get("text").and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(|text| vec![Caption { id: format!("{segment}:partial"), text: text.into(), definite: false }]).unwrap_or_default()
+}
+
+pub async fn caption_stream(
+ mut config: DoubaoSpeechConfig, token: String, dictionary: crate::dictionary::DictionaryData,
+ mut audio: mpsc::Receiver<Vec<u8>>, on_caption: impl Fn(Caption), on_ready: impl Fn(),
+) -> Result<(), String> {
+ validate(&config)?;
+ config.show_utterances = true;
+ let _ = rustls::crypto::ring::default_provider().install_default();
+ let mut segment = 0u64;
+ loop {
+  let request = authorized_request(&config, &token)?;
+  let (mut socket, _) = tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::connect_async(request)).await.map_err(|_| "连接字幕识别超时".to_string())?.map_err(format_connect_error)?;
+  socket.send(Message::Binary(initial_packet(&config, &dictionary.hotwords)?.into())).await.map_err(|_| "初始化字幕识别失败".to_string())?;
+  on_ready();
+  let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+  let mut draining = false;
+  let mut drain_deadline = deadline;
+  let mut seen = std::collections::HashMap::<String, (String, bool)>::new();
+  loop {
+   tokio::select! {
+    pcm = audio.recv(), if !draining => match pcm {
+     Some(pcm) => tokio::time::timeout(std::time::Duration::from_secs(3), socket.send(Message::Binary(audio_packet(&pcm, false)?.into()))).await.map_err(|_| "字幕音频上传超时".to_string())?.map_err(|_| "字幕音频上传失败".to_string())?,
+     None => return Ok(()),
+    },
+    _ = tokio::time::sleep_until(if draining { drain_deadline } else { deadline }) => {
+     if draining { break; }
+     tokio::time::timeout(std::time::Duration::from_secs(3), socket.send(Message::Binary(audio_packet(&[], true)?.into()))).await.map_err(|_| "字幕分段结束超时".to_string())?.map_err(|_| "字幕分段结束失败".to_string())?;
+     draining = true;
+     drain_deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(1200);
+    },
+    incoming = socket.next() => match incoming {
+     Some(Ok(Message::Binary(raw))) => if let Some(packet) = parse_server_packet(&raw)? {
+      for mut caption in captions(&packet.json, segment) {
+       caption.text = crate::dictionary::apply_replacements(&caption.text, &dictionary.replacements);
+       let value = (caption.text.clone(), caption.definite);
+       if seen.get(&caption.id) != Some(&value) {
+        // Definite utterances are immutable. Replayed provider results cannot re-execute commands.
+        if seen.get(&caption.id).is_some_and(|previous| previous.1) { continue; }
+        seen.insert(caption.id.clone(), value); on_caption(caption);
+       }
+      }
+      if packet.is_final { break; }
+     },
+     // The provider rotates streaming connections. End this segment and let
+     // the outer loop reconnect while hardware capture continues.
+     Some(Ok(Message::Close(_))) | None => break,
+     Some(Err(_)) => break,
+     _ => {},
+    }
+   }
+  }
+  segment += 1;
+ }
+}
+
+#[cfg(test)]
+mod caption_tests {
+ use super::*;
+ #[test] fn emits_individual_final_utterances_instead_of_cumulative_commands() {
+  let value = serde_json::json!({"result":{"text":"戴面具取消贴纸","utterances":[{"text":"戴面具","start_time":0,"definite":true},{"text":"取消贴纸","start_time":1200,"definite":false}]}});
+  let c = captions(&value, 3);
+  assert_eq!(c.len(), 2); assert_eq!(c[0].id, "3:0"); assert!(c[0].definite); assert!(!c[1].definite);
+  assert_eq!(c[1].text, "取消贴纸");
+  assert_ne!(captions(&value, 4)[0].id, c[0].id);
+ }
+ #[test] fn uncertain_results_are_display_only() {
+  let c = captions(&serde_json::json!({"result":[{"text":"戴面具"}]}), 0);
+  assert_eq!(c.len(), 1); assert!(!c[0].definite);
+  assert!(captions(&serde_json::json!({"result":{}}), 0).is_empty());
+ }
+}

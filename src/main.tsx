@@ -8,7 +8,10 @@ import "./dictionary.css";
 import "./overview-extra.css";
 import "./keyboard.css";
 import "./app-picker.css";
+import "./voice-actions.css";
 import "./voice-overlay.css";
+import "./mcd.css";
+import "./cockpit.css";
 
 const voiceOverlay = new URLSearchParams(window.location.search).get("window") === "voice-overlay";
 

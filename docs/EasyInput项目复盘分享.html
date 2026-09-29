@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyInput｜项目复盘分享</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* === THEME TOKENS === */
+        :root {
+            --stage-bg: #080b10;
+            --slide-bg: #0b1017;
+            --ink: #f4f7f5;
+            --muted: #aab5bd;
+            --dim: #61707a;
+            --cyan: #6ce9df;
+            --cyan-soft: rgba(108, 233, 223, .18);
+            --lime: #d7ff52;
+            --orange: #ff765e;
+            --violet: #9e8cff;
+            --line: rgba(207, 226, 230, .18);
+            --panel: rgba(18, 27, 36, .86);
+            --panel-2: rgba(24, 35, 45, .72);
+            --display: 'Archivo Black', 'Noto Sans SC', sans-serif;
+            --body: 'Space Grotesk', 'Noto Sans SC', sans-serif;
+            --mono: 'DM Mono', monospace;
+            --ease: cubic-bezier(.16, 1, .3, 1);
+        }
+
+        /* === RESET AND TYPOGRAPHY === */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; }
+        body { color: var(--ink); font-family: var(--body); }
+        h1, h2, h3, p { margin: 0; }
+        button { font: inherit; }
+
+        /* === FIXED 16:9 STAGE: MANDATORY BASE STYLES === */
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: var(--stage-bg, #000);
+        }
+        .deck-viewport {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            background: var(--stage-bg, #000);
+        }
+        .deck-stage {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            transform-origin: 0 0;
+            background: var(--slide-bg, #fff);
+        }
+        .slide {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            display: block;
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+            background: var(--slide-bg, #fff);
+        }
+        .slide.active,
+        .slide.visible {
+            visibility: visible;
+            opacity: 1;
+            pointer-events: auto;
+            z-index: 1;
+        }
+        img, video, canvas, svg { max-width: 100%; max-height: 100%; }
+        .deck-controls {
+            position: fixed;
+            left: 50%;
+            bottom: 22px;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+        @media print {
+            html, body { width: 1920px; height: auto; overflow: visible; background: #fff; }
+            .deck-viewport { position: static; overflow: visible; background: #fff; }
+            .deck-stage { position: static; width: auto; height: auto; transform: none !important; background: none; }
+            .slide { position: relative; display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; width: 1920px; height: 1080px; break-after: page; page-break-after: always; }
+            .slide:last-child { break-after: auto; page-break-after: auto; }
+            .deck-controls { display: none !important; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .2s !important; }
+        }
+
+        /* === GLOBAL DECK CHROME === */
+        .slide::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+            background-size: 64px 64px;
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,.75), transparent 70%);
+        }
+        .slide::after {
+            content: '';
+            position: absolute;
+            width: 620px;
+            height: 620px;
+            right: -240px;
+            top: -280px;
+            border-radius: 50%;
+            border: 1px solid rgba(108,233,223,.18);
+            box-shadow: 0 0 0 38px rgba(108,233,223,.035), 0 0 0 76px rgba(108,233,223,.02);
+            pointer-events: none;
+        }
+        .slide-inner { position: relative; z-index: 1; height: 100%; padding: 78px 104px 72px; }
+        .eyebrow { display: flex; align-items: center; gap: 16px; color: var(--cyan); font: 500 18px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+        .eyebrow::before { content: ''; width: 36px; height: 2px; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+        .page-no { position: absolute; top: 78px; right: 104px; color: var(--dim); font: 500 18px var(--mono); letter-spacing: .12em; }
+        .rule { height: 1px; background: var(--line); }
+        .mono { font-family: var(--mono); }
+        .accent { color: var(--cyan); }
+        .lime { color: var(--lime); }
+        .muted { color: var(--muted); }
+        .reveal { opacity: 0; transform: translateY(26px); transition: opacity .72s var(--ease), transform .72s var(--ease); }
+        .slide.visible .reveal { opacity: 1; transform: translateY(0); }
+        .slide.visible .reveal:nth-child(2) { transition-delay: .08s; }
+        .slide.visible .reveal:nth-child(3) { transition-delay: .16s; }
+        .slide.visible .reveal:nth-child(4) { transition-delay: .24s; }
+        .slide.visible .reveal:nth-child(5) { transition-delay: .32s; }
+        .slide.visible .reveal:nth-child(6) { transition-delay: .40s; }
+
+        /* === TITLE SLIDE === */
+        .title-slide { background: radial-gradient(circle at 72% 28%, rgba(108,233,223,.15), transparent 28%), linear-gradient(135deg, #080b10 0%, #101923 52%, #0a1117 100%); }
+        .title-slide .slide-inner { padding-top: 88px; }
+        .title-kicker { margin-top: 142px; color: var(--lime); font: 500 20px var(--mono); letter-spacing: .1em; }
+        .title-slide h1 { max-width: 1280px; margin-top: 34px; font: 900 92px/1.12 var(--display); letter-spacing: -.045em; }
+        .title-slide h1 span { color: var(--cyan); }
+        .title-sub { max-width: 900px; margin-top: 32px; color: var(--muted); font-size: 30px; line-height: 1.5; }
+        .title-meta { position: absolute; left: 104px; bottom: 76px; display: flex; gap: 48px; color: var(--muted); font-size: 19px; }
+        .title-meta strong { display: block; color: var(--ink); font-size: 23px; margin-bottom: 8px; }
+        .signal-orbit { position: absolute; right: 132px; top: 236px; width: 520px; height: 520px; border: 1px solid rgba(108,233,223,.42); border-radius: 50%; box-shadow: 0 0 42px rgba(108,233,223,.1); }
+        .signal-orbit::before, .signal-orbit::after { content: ''; position: absolute; inset: 64px; border: 1px solid rgba(108,233,223,.25); border-radius: 50%; }
+        .signal-orbit::after { inset: 136px; border-style: dashed; border-color: rgba(215,255,82,.45); }
+        .orbit-core { position: absolute; left: 50%; top: 50%; width: 118px; height: 118px; transform: translate(-50%,-50%); border-radius: 28px; background: var(--cyan); color: #0b1017; display: grid; place-items: center; font: 900 28px/1 var(--display); box-shadow: 0 0 60px rgba(108,233,223,.45); }
+        .orbit-dot { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 18px var(--lime); }
+        .dot-a { left: 42px; top: 120px; } .dot-b { right: 18px; top: 294px; background: var(--orange); box-shadow: 0 0 18px var(--orange); } .dot-c { left: 180px; bottom: 30px; }
+
+        /* === COMMON CONTENT LAYOUTS === */
+        .section-head { display: flex; align-items: flex-start; justify-content: space-between; margin-top: 44px; }
+        .section-head h2 { max-width: 1170px; font: 900 66px/1.12 var(--display); letter-spacing: -.04em; }
+        .section-head p { width: 360px; color: var(--muted); font-size: 20px; line-height: 1.55; padding-top: 12px; }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; margin-top: 74px; }
+        .panel { position: relative; background: linear-gradient(145deg, rgba(25,37,48,.95), rgba(13,20,28,.88)); border: 1px solid var(--line); border-radius: 18px; padding: 34px; box-shadow: 0 22px 70px rgba(0,0,0,.18); }
+        .panel-label { color: var(--cyan); font: 500 16px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+        .panel h3 { margin-top: 16px; font-size: 32px; line-height: 1.2; }
+        .panel p { margin-top: 16px; color: var(--muted); font-size: 22px; line-height: 1.5; }
+        .panel ul { margin-top: 22px; list-style: none; display: grid; gap: 16px; }
+        .panel li { color: var(--muted); font-size: 22px; line-height: 1.4; padding-left: 28px; position: relative; }
+        .panel li::before { content: ''; position: absolute; left: 0; top: .62em; width: 9px; height: 9px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px rgba(215,255,82,.6); }
+        .quote { margin-top: 28px; padding: 26px 30px; border-left: 4px solid var(--cyan); background: rgba(108,233,223,.08); color: var(--ink); font-size: 27px; line-height: 1.45; }
+        .big-number { font: 900 148px/.86 var(--display); color: transparent; -webkit-text-stroke: 1px rgba(108,233,223,.42); letter-spacing: -.08em; }
+
+        /* === SLIDE 2: OUTCOME === */
+        .outcome-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 82px; margin-top: 70px; }
+        .console-card { min-height: 510px; border-radius: 22px; border: 1px solid rgba(108,233,223,.34); background: linear-gradient(145deg, rgba(29,51,59,.82), rgba(13,22,31,.88)); padding: 34px; position: relative; overflow: hidden; }
+        .console-card::after { content: 'EASYINPUT'; position: absolute; right: -10px; bottom: -26px; color: rgba(108,233,223,.05); font: 900 128px var(--display); letter-spacing: -.08em; }
+        .console-top { display: flex; justify-content: space-between; color: var(--dim); font: 500 16px var(--mono); }
+        .led { display: inline-flex; align-items: center; gap: 10px; color: var(--lime); }
+        .led::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 14px var(--lime); }
+        .console-title { margin-top: 88px; font: 900 54px/1.08 var(--display); max-width: 600px; }
+        .console-title span { color: var(--cyan); }
+        .console-footer { position: absolute; left: 34px; right: 34px; bottom: 30px; display: flex; gap: 14px; }
+        .chip { padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: 500 16px var(--mono); }
+        .outcome-list { display: grid; gap: 18px; align-content: start; }
+        .outcome-item { display: grid; grid-template-columns: 56px 1fr; gap: 18px; align-items: start; padding: 18px 0; border-bottom: 1px solid var(--line); }
+        .outcome-item .idx { color: var(--cyan); font: 500 18px var(--mono); }
+        .outcome-item h3 { font-size: 26px; }
+        .outcome-item p { margin-top: 7px; color: var(--muted); font-size: 20px; line-height: 1.4; }
+
+        /* === SLIDE 3: VOICE SCENARIOS === */
+        .scenario-grid { margin-top: 68px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; }
+        .scenario-card { min-height: 260px; grid-column: span 2; padding: 28px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg, rgba(21,32,42,.92), rgba(13,20,28,.9)); position: relative; overflow: hidden; }
+        .scenario-card:nth-child(4) { grid-column: 2 / span 2; }
+        .scenario-card:nth-child(5) { grid-column: 4 / span 2; }
+        .scenario-card::after { content: ''; position: absolute; width: 130px; height: 130px; right: -42px; bottom: -54px; border: 1px solid currentColor; border-radius: 50%; opacity: .18; box-shadow: 0 0 0 20px rgba(255,255,255,.02); }
+        .scenario-card:nth-child(1) { color: var(--cyan); } .scenario-card:nth-child(2) { color: var(--lime); } .scenario-card:nth-child(3) { color: var(--orange); } .scenario-card:nth-child(4) { color: var(--violet); } .scenario-card:nth-child(5) { color: #ffcc72; }
+        .scenario-icon { width: 54px; height: 54px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 14px; font: 500 17px var(--mono); }
+        .scenario-card h3 { margin-top: 36px; color: var(--ink); font-size: 30px; }
+        .scenario-card p { margin-top: 10px; color: var(--muted); font-size: 19px; line-height: 1.4; max-width: 245px; }
+        .scenario-foot { margin-top: 34px; display: flex; align-items: center; justify-content: space-between; padding: 22px 28px; border: 1px solid rgba(108,233,223,.3); border-radius: 14px; background: rgba(108,233,223,.06); }
+        .scenario-foot strong { font-size: 25px; } .scenario-foot span { color: var(--cyan); font: 500 15px var(--mono); letter-spacing: .08em; }
+
+        /* === SLIDE 4: ARCHITECTURE === */
+        .arch { margin-top: 70px; display: grid; grid-template-columns: 300px 1fr 300px; gap: 36px; align-items: center; }
+        .arch-col { display: grid; gap: 20px; }
+        .arch-node { min-height: 128px; padding: 22px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); }
+        .arch-node h3 { font-size: 23px; }
+        .arch-node p { margin-top: 8px; color: var(--muted); font-size: 17px; line-height: 1.4; }
+        .arch-center { min-height: 370px; display: grid; place-items: center; position: relative; }
+        .arch-core { width: 300px; height: 300px; display: grid; place-items: center; text-align: center; border-radius: 50%; border: 2px solid var(--cyan); background: radial-gradient(circle, rgba(108,233,223,.2), rgba(108,233,223,.03) 65%, transparent 66%); box-shadow: 0 0 70px rgba(108,233,223,.16); }
+        .arch-core strong { display: block; font: 900 42px/1.08 var(--display); }
+        .arch-core span { display: block; margin-top: 10px; color: var(--cyan); font: 500 16px var(--mono); }
+        .wire { position: absolute; height: 1px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); opacity: .75; }
+        .wire-left { left: -90px; right: calc(50% + 150px); top: 50%; } .wire-right { left: calc(50% + 150px); right: -90px; top: 50%; }
+        .arch-caption { margin-top: 58px; text-align: center; color: var(--muted); font-size: 24px; }
+        .arch-caption strong { color: var(--ink); }
+
+        /* === SLIDE 5: TRADEOFF === */
+        .tradeoff { margin-top: 76px; display: grid; grid-template-columns: 1fr 120px 1fr; gap: 32px; align-items: center; }
+        .trade-card { min-height: 432px; padding: 36px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+        .trade-card.old { border-color: rgba(255,118,94,.4); background: linear-gradient(145deg, rgba(70,38,38,.5), rgba(18,25,32,.9)); }
+        .trade-card.new { border-color: rgba(108,233,223,.42); background: linear-gradient(145deg, rgba(28,59,63,.62), rgba(18,25,32,.9)); }
+        .trade-card h3 { margin-top: 18px; font-size: 30px; }
+        .pipeline { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .step { padding: 13px 16px; border-radius: 9px; border: 1px solid var(--line); color: var(--ink); font: 500 17px var(--mono); background: rgba(255,255,255,.035); }
+        .step.bad { border-color: rgba(255,118,94,.4); color: #ffb0a1; } .step.good { border-color: rgba(108,233,223,.4); color: var(--cyan); }
+        .arrow { color: var(--dim); font-size: 22px; }
+        .trade-card ul { margin-top: 34px; list-style: none; display: grid; gap: 18px; }
+        .trade-card li { color: var(--muted); font-size: 20px; line-height: 1.4; padding-left: 24px; position: relative; }
+        .trade-card li::before { content: '×'; position: absolute; left: 0; color: var(--orange); font: 700 20px var(--mono); }
+        .trade-card.new li::before { content: '✓'; color: var(--lime); }
+        .trade-arrow { display: grid; place-items: center; color: var(--lime); font: 900 42px var(--display); }
+        .trade-arrow small { margin-top: 10px; color: var(--dim); font: 500 14px var(--mono); writing-mode: vertical-rl; letter-spacing: .1em; }
+
+        /* === SLIDE 6: REAL-TIME LOOP === */
+        .loop-wrap { margin-top: 68px; display: grid; grid-template-columns: 1fr 480px; gap: 90px; align-items: center; }
+        .loop { position: relative; height: 450px; }
+        .loop-track { position: absolute; inset: 40px 80px; border: 1px dashed rgba(108,233,223,.4); border-radius: 50%; transform: rotate(-10deg); }
+        .loop-node { position: absolute; width: 186px; min-height: 98px; padding: 18px; border: 1px solid var(--line); background: var(--panel); border-radius: 14px; }
+        .loop-node strong { display: block; font-size: 22px; } .loop-node span { display: block; margin-top: 8px; color: var(--muted); font-size: 16px; }
+        .ln-1 { left: 40px; top: 28px; } .ln-2 { right: 30px; top: 68px; } .ln-3 { right: 12px; bottom: 46px; } .ln-4 { left: 230px; bottom: 4px; } .ln-5 { left: 24px; bottom: 74px; }
+        .loop-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 190px; height: 190px; border-radius: 50%; display: grid; place-items: center; text-align: center; background: var(--cyan); color: #0b1017; box-shadow: 0 0 70px rgba(108,233,223,.28); }
+        .loop-center strong { font: 900 30px/1.05 var(--display); } .loop-center span { margin-top: 10px; font: 500 14px var(--mono); }
+        .spec-card { padding: 30px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+        .spec-card h3 { font-size: 26px; } .spec-card p { margin-top: 18px; color: var(--muted); font-size: 20px; line-height: 1.45; }
+        .specs { margin-top: 26px; display: grid; gap: 14px; }
+        .spec { display: flex; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid var(--line); color: var(--muted); font: 500 17px var(--mono); }
+        .spec b { color: var(--lime); font-weight: 500; }
+
+        /* === SLIDE 7: VOICE ACTION === */
+        .action-flow { margin-top: 78px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; align-items: stretch; }
+        .action-card { position: relative; min-height: 250px; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+        .action-card:not(:last-child)::after { content: '→'; position: absolute; right: -27px; top: 50%; transform: translateY(-50%); color: var(--cyan); font-size: 28px; z-index: 2; }
+        .action-card .n { color: var(--cyan); font: 500 16px var(--mono); } .action-card h3 { margin-top: 36px; font-size: 26px; line-height: 1.15; } .action-card p { margin-top: 14px; color: var(--muted); font-size: 18px; line-height: 1.45; }
+        .action-quote { margin-top: 62px; display: flex; justify-content: space-between; align-items: center; padding: 26px 32px; border: 1px solid rgba(215,255,82,.32); background: rgba(215,255,82,.07); border-radius: 14px; }
+        .action-quote strong { font-size: 30px; } .action-quote span { color: var(--lime); font: 500 17px var(--mono); }
+
+        /* === SLIDE 8: FUNCTION CALLING === */
+        .function-layout { margin-top: 66px; display: grid; grid-template-columns: 1fr 620px; gap: 80px; }
+        .timeline { display: grid; gap: 0; }
+        .timeline-item { display: grid; grid-template-columns: 72px 1fr; min-height: 86px; position: relative; }
+        .timeline-item:not(:last-child)::after { content: ''; position: absolute; left: 35px; top: 56px; bottom: 0; width: 1px; background: var(--line); }
+        .timeline-num { width: 48px; height: 48px; display: grid; place-items: center; border: 1px solid var(--cyan); border-radius: 50%; color: var(--cyan); font: 500 16px var(--mono); background: #0b1017; z-index: 1; }
+        .timeline-item h3 { font-size: 24px; padding-top: 9px; } .timeline-item p { margin-top: 6px; color: var(--muted); font-size: 18px; }
+        .callout { border: 1px solid rgba(255,118,94,.45); background: linear-gradient(145deg, rgba(75,42,39,.5), rgba(24,26,30,.88)); border-radius: 18px; padding: 34px; align-self: start; }
+        .callout .panel-label { color: #ffab9c; } .callout h3 { margin-top: 18px; font-size: 32px; line-height: 1.25; } .callout p { margin-top: 20px; color: var(--muted); font-size: 21px; line-height: 1.5; }
+        .code-line { margin-top: 26px; padding: 16px 18px; border-radius: 10px; background: rgba(0,0,0,.24); color: #ffcfbf; font: 500 16px/1.5 var(--mono); }
+
+        /* === SLIDE 9: DEBUGGING === */
+        .debug-grid { margin-top: 72px; display: grid; grid-template-columns: 1fr 1.1fr; gap: 70px; }
+        .symptom-stack { display: grid; gap: 12px; }
+        .symptom { display: flex; gap: 16px; align-items: center; padding: 17px 20px; border: 1px solid var(--line); border-radius: 12px; background: rgba(22,30,38,.72); color: var(--muted); font-size: 20px; }
+        .symptom i { width: 11px; height: 11px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 12px rgba(255,118,94,.6); flex: 0 0 auto; }
+        .debug-visual { position: relative; min-height: 450px; border: 1px solid var(--line); border-radius: 18px; background: repeating-linear-gradient(0deg, rgba(108,233,223,.03) 0, rgba(108,233,223,.03) 1px, transparent 1px, transparent 38px), var(--panel); padding: 30px; overflow: hidden; }
+        .debug-visual h3 { font-size: 28px; } .debug-visual p { margin-top: 12px; color: var(--muted); font-size: 19px; }
+        .log-lines { margin-top: 34px; display: grid; gap: 12px; font: 500 16px var(--mono); }
+        .log-line { display: grid; grid-template-columns: 116px 1fr; gap: 16px; color: var(--dim); } .log-line b { color: var(--cyan); font-weight: 500; } .log-line span { color: var(--muted); } .log-line.warn span { color: #ffb0a1; }
+        .debug-caption { position: absolute; right: 28px; bottom: 26px; color: var(--lime); font: 500 15px var(--mono); }
+
+        /* === SLIDE 10: STABILIZATION === */
+        .two-routes { margin-top: 74px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+        .route { min-height: 350px; border: 1px solid var(--line); border-radius: 18px; padding: 30px; background: var(--panel); }
+        .route.direct { border-color: rgba(215,255,82,.4); background: linear-gradient(145deg, rgba(53,62,31,.56), rgba(18,25,32,.9)); }
+        .route.ai { border-color: rgba(158,140,255,.42); background: linear-gradient(145deg, rgba(48,43,75,.54), rgba(18,25,32,.9)); }
+        .route-tag { display: inline-flex; padding: 8px 12px; border-radius: 999px; font: 500 15px var(--mono); border: 1px solid currentColor; }
+        .direct .route-tag { color: var(--lime); } .ai .route-tag { color: var(--violet); }
+        .route h3 { margin-top: 26px; font-size: 30px; } .route p { margin-top: 12px; color: var(--muted); font-size: 19px; line-height: 1.45; }
+        .route ul { margin-top: 22px; list-style: none; display: flex; flex-wrap: wrap; gap: 10px; } .route li { padding: 9px 12px; border-radius: 8px; background: rgba(255,255,255,.06); color: var(--muted); font: 500 15px var(--mono); }
+        .stability-foot { margin-top: 34px; display: flex; gap: 22px; align-items: center; color: var(--muted); font-size: 22px; } .stability-foot b { color: var(--ink); }
+
+        /* === SLIDE 11: RESPONSIBILITY === */
+        .responsibility { margin-top: 72px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .role { min-height: 380px; padding: 30px; border-radius: 18px; border: 1px solid var(--line); background: var(--panel); }
+        .role:nth-child(1) { border-top: 4px solid var(--orange); } .role:nth-child(2) { border-top: 4px solid var(--cyan); } .role:nth-child(3) { border-top: 4px solid var(--violet); }
+        .role h3 { margin-top: 22px; font-size: 30px; } .role small { color: var(--dim); font: 500 15px var(--mono); } .role dl { margin-top: 28px; display: grid; gap: 15px; } .role dt { color: var(--dim); font: 500 14px var(--mono); text-transform: uppercase; } .role dd { color: var(--muted); font-size: 19px; line-height: 1.35; }
+        .aec { margin-top: 34px; padding: 24px 30px; border-radius: 14px; background: rgba(255,118,94,.08); border: 1px solid rgba(255,118,94,.35); color: var(--muted); font-size: 22px; } .aec strong { color: #ffb0a1; }
+
+        /* === SLIDE 12: LESSONS === */
+        .lessons-layout { margin-top: 72px; display: grid; grid-template-columns: 1fr 1fr; gap: 94px; align-items: center; }
+        .lesson-hero { font: 900 62px/1.08 var(--display); letter-spacing: -.045em; } .lesson-hero span { color: var(--cyan); }
+        .lesson-list { display: grid; gap: 24px; } .lesson { display: grid; grid-template-columns: 66px 1fr; gap: 18px; align-items: start; } .lesson-num { color: var(--lime); font: 500 17px var(--mono); padding-top: 6px; } .lesson h3 { font-size: 27px; } .lesson p { margin-top: 7px; color: var(--muted); font-size: 19px; line-height: 1.4; }
+        .closing { position: absolute; left: 104px; right: 104px; bottom: 68px; display: flex; justify-content: space-between; align-items: end; padding-top: 24px; border-top: 1px solid var(--line); } .closing p { color: var(--muted); font-size: 21px; } .closing strong { color: var(--lime); font: 500 17px var(--mono); }
+
+        /* === PRESENTATION CONTROLS === */
+        .progress-wrap { position: fixed; left: 50%; bottom: 26px; width: 300px; height: 3px; transform: translateX(-50%); background: rgba(255,255,255,.15); z-index: 1001; border-radius: 99px; }
+        .progress-bar { height: 100%; width: 0; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); transition: width .5s var(--ease); border-radius: 99px; }
+        .counter { position: fixed; right: 30px; bottom: 22px; color: var(--dim); font: 500 14px var(--mono); z-index: 1001; }
+        .edit-hotzone { position: fixed; top: 0; left: 0; width: 86px; height: 86px; z-index: 10000; cursor: pointer; }
+        .edit-toggle { position: fixed; top: 18px; left: 18px; z-index: 10001; opacity: 0; pointer-events: none; border: 1px solid var(--line); background: rgba(11,16,23,.92); color: var(--cyan); border-radius: 9px; padding: 9px 12px; cursor: pointer; transition: opacity .25s ease; }
+        .edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+        .editing [contenteditable="true"] { outline: 1px dashed var(--cyan); outline-offset: 5px; cursor: text; }
+        .edit-hint { position: fixed; top: 18px; left: 148px; z-index: 10001; opacity: 0; color: var(--muted); font: 500 13px var(--mono); transition: opacity .2s; pointer-events: none; }
+        .editing .edit-hint { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div class="deck-viewport">
+        <main class="deck-stage" id="deckStage">
+            <!-- === SLIDE 1: TITLE === -->
+            <section class="slide title-slide active visible" data-title="引子">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">WaytoAGI · 第七期 AI 训练营</div>
+                    <div class="title-kicker reveal">PROJECT RETROSPECTIVE / 01</div>
+                    <h1 class="reveal" data-editable="true" contenteditable="false">不会写代码的人，<br><span>怎么做出 Intel Mac 版 EasyInput</span></h1>
+                    <p class="title-sub reveal" data-editable="true" contenteditable="false">从“我的电脑用不了”，到实时语音、语音打开应用。</p>
+                    <div class="signal-orbit reveal" aria-hidden="true"><div class="orbit-core">AI<br>× Mac</div><i class="orbit-dot dot-a"></i><i class="orbit-dot dot-b"></i><i class="orbit-dot dot-c"></i></div>
+                    <div class="title-meta reveal"><div><strong>15 MIN</strong>内部分享</div><div><strong>12 PAGES</strong>从问题到复盘</div><div><strong>2026</strong>EasyInput</div></div>
+                    <div class="page-no">00 / 12</div>
+                </div>
+                <!-- 演讲备注：项目的起点并不宏大，就是自己的 Intel Mac 用不了。AI 帮我从现成界面和开源固件出发，一路做到实时通话和语音打开应用。 -->
+            </section>
+
+            <!-- === SLIDE 2: OUTCOME === -->
+            <section class="slide" data-title="做出了什么">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">01 / THE OUTCOME</div><div class="page-no">01 / 12</div>
+                    <div class="section-head reveal"><h2>最终做出的是<br><span class="accent">连接世界的入口</span></h2><p>从键盘、AI 和 Mac 出发，也可以继续连接其他软件、其他硬件，以及更多能力。</p></div>
+                    <div class="outcome-grid">
+                        <div class="console-card reveal"><div class="console-top"><span class="mono">EASYINPUT / INTEL MAC</span><span class="led">ONLINE</span></div><div class="console-title">连接世界<br><span>入口</span></div><div class="console-footer"><span class="chip">SOFTWARE</span><span class="chip">HARDWARE</span><span class="chip">MORE TO COME</span></div></div>
+                        <div class="outcome-list reveal">
+                            <div class="outcome-item"><span class="idx">01</span><div><h3>多端接入</h3><p>键盘、麦克风、扬声器等设备随时接入。</p></div></div>
+                            <div class="outcome-item"><span class="idx">02</span><div><h3>AI 能力</h3><p>语音理解、实时通话和内容生成。</p></div></div>
+                            <div class="outcome-item"><span class="idx">03</span><div><h3>软件动作</h3><p>微信、剪映、Codex，以及未来更多应用。</p></div></div>
+                            <div class="outcome-item"><span class="idx">04</span><div><h3>硬件扩展</h3><p>不止一块键盘，还能连接更多外设。</p></div></div>
+                        </div>
+                    </div>
+                    <div class="quote reveal">EasyInput 不是一个封闭的应用，而是把各种能力接进来的入口。</div>
+                </div>
+                <!-- 演讲备注：如果只看界面，它像普通桌面软件；但它真正的价值，是成为连接世界的入口。现在连接的是键盘、AI、Mac 和几个应用，未来可以继续接入其他软件、其他硬件和更多能力。 -->
+            </section>
+
+            <!-- === SLIDE 3: VOICE SCENARIOS === -->
+            <section class="slide" data-title="语音场景">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">02 / VOICE AS AN ENTRY</div><div class="page-no">02 / 12</div>
+                    <div class="section-head reveal"><h2>语音不只是输入，<br><span class="accent">而是一组能力入口</span></h2><p>同一套实时语音能力，可以迁移到不同场景：教育、翻译、陪伴、知识库、控制。</p></div>
+                    <div class="scenario-grid reveal">
+                        <div class="scenario-card"><div class="scenario-icon">01</div><h3>教育</h3><p>讲题、陪练、口语反馈，让学习变成对话。</p></div>
+                        <div class="scenario-card"><div class="scenario-icon">02</div><h3>翻译</h3><p>同声传译、跨语言协作，减少沟通的停顿。</p></div>
+                        <div class="scenario-card"><div class="scenario-icon">03</div><h3>陪伴</h3><p>情绪回应、日常对话，提供持续的交流感。</p></div>
+                        <div class="scenario-card"><div class="scenario-icon">04</div><h3>知识库</h3><p>语音问答、知识检索，把信息变成随时可问的入口。</p></div>
+                        <div class="scenario-card"><div class="scenario-icon">05</div><h3>控制</h3><p>操作软件、调度硬件，让一句话触发真实动作。</p></div>
+                    </div>
+                    <div class="scenario-foot reveal"><strong>入口的价值，不是只完成一个动作，而是让下一种连接变得更容易。</strong><span>ONE VOICE · MANY WORLDS</span></div>
+                </div>
+                <!-- 演讲备注：这套能力不应该只被理解成“语音输入”。实时语音可以成为不同应用的入口：教育、翻译、陪伴、知识库，也可以继续向软件和硬件控制延伸。 -->
+            </section>
+
+            <!-- === SLIDE 4: ARCHITECTURE === -->
+            <section class="slide" data-title="业务架构">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">03 / SYSTEM MAP</div><div class="page-no">03 / 12</div>
+                    <div class="section-head reveal"><h2>四个角色，<span class="accent">一条链路</span></h2><p>每个角色只做自己擅长的事，边界清楚，系统才可控。</p></div>
+                    <div class="arch reveal">
+                        <div class="arch-col"><div class="arch-node"><h3>用户</h3><p>说话 / 按键<br>提出需求</p></div><div class="arch-node"><h3>EasyInput 键盘</h3><p>采集声音<br>播放声音 / 触发</p></div></div>
+                        <div class="arch-center"><span class="wire wire-left"></span><span class="wire wire-right"></span><div class="arch-core"><div><strong>Intel Mac<br>客户端</strong><span>CONTROL PLANE</span></div></div></div>
+                        <div class="arch-col"><div class="arch-node"><h3>豆包 / 火山方舟</h3><p>识别、理解、对话<br>生成语音 / 选择工具</p></div><div class="arch-node"><h3>本机应用与数据</h3><p>微信 · 剪映 · Codex<br>配置 · 词库 · 历史</p></div></div>
+                    </div>
+                    <div class="arch-caption reveal"><strong>键盘负责收音和触发，AI 负责听懂和回答，Mac 客户端负责串起来并真正执行。</strong></div>
+                </div>
+                <!-- 演讲备注：豆包不会直接操作电脑，固件也不知道什么是微信。真正打开应用的动作始终由 Mac 客户端执行。 -->
+            </section>
+
+            <!-- === SLIDE 5: TRADEOFF === -->
+            <section class="slide" data-title="方案取舍">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">04 / THE PIVOT</div><div class="page-no">04 / 12</div>
+                    <div class="section-head reveal"><h2>实时语音的第一版思路，<br><span class="accent">为什么放弃</span></h2><p>链路越长，延迟和插话状态越难控制。</p></div>
+                    <div class="tradeoff reveal">
+                        <div class="trade-card old"><span class="panel-label">V1 / CLASSIC PIPELINE</span><h3>每一步都要等上一步</h3><div class="pipeline"><span class="step bad">语音</span><i class="arrow">→</i><span class="step bad">ASR</span><i class="arrow">→</i><span class="step bad">LLM</span><i class="arrow">→</i><span class="step bad">TTS</span></div><ul><li>延迟不断叠加</li><li>用户插话时，要协调识别、模型、播放三层</li><li>能做出来，却不像自然通话</li></ul></div>
+                        <div class="trade-arrow">→<small>切换思路</small></div>
+                        <div class="trade-card new"><span class="panel-label">V2 / REAL-TIME MODEL</span><h3>端到端实时语音</h3><div class="pipeline"><span class="step good">连续声音</span><i class="arrow">→</i><span class="step good">实时会话</span><i class="arrow">→</i><span class="step good">流式声音</span></div><ul><li>文字理解、对话、语音输出在同一会话里完成</li><li>支持取消当前回答</li><li>更适合“通话”，而不是语音按钮</li></ul></div>
+                    </div>
+                </div>
+                <!-- 演讲备注：我最初也想到 ASR→LLM→TTS，但链路太长，插话时难以协调。豆包端到端实时语音接口更适合这个场景。 -->
+            </section>
+
+            <!-- === SLIDE 6: REAL-TIME CALL === -->
+            <section class="slide" data-title="实时通话">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">05 / LIVE LOOP</div><div class="page-no">05 / 12</div>
+                    <div class="section-head reveal"><h2>一次实时通话，<span class="accent">如何跑起来</span></h2><p>边收、边处理、边播放，声音不再排队等候。</p></div>
+                    <div class="loop-wrap">
+                        <div class="loop reveal"><div class="loop-track"></div><div class="loop-node ln-1"><strong>用户说话</strong><span>按下实时通话键</span></div><div class="loop-node ln-2"><strong>键盘上行</strong><span>持续上传麦克风</span></div><div class="loop-node ln-3"><strong>豆包返回</strong><span>识别文字 + 回复声音</span></div><div class="loop-node ln-4"><strong>键盘下行</strong><span>流式送入扬声器</span></div><div class="loop-node ln-5"><strong>中途插话</strong><span>客户端取消旧回答</span></div><div class="loop-center"><div><strong>20 ms</strong><span>一小段声音</span></div></div></div>
+                        <div class="spec-card reveal"><h3>音频规格</h3><p>小片段流式传输，让体验更像真实通话。</p><div class="specs"><div class="spec"><span>上行声音</span><b>16 kHz</b></div><div class="spec"><span>下行声音</span><b>24 kHz</b></div><div class="spec"><span>播放策略</span><b>边生成边播</b></div><div class="spec"><span>打断策略</span><b>取消 + 清队列</b></div></div></div>
+                    </div>
+                </div>
+                <!-- 演讲备注：豆包返回的不是整个音频文件，而是一小段一小段的声音。客户端发出取消指令并清掉未播放声音，旧回答就不会继续排队。 -->
+            </section>
+
+            <!-- === SLIDE 7: VOICE ACTION === -->
+            <section class="slide" data-title="语音调用">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">06 / VOICE ACTION</div><div class="page-no">06 / 12</div>
+                    <div class="section-head reveal"><h2>让一句“打开微信”，<br><span class="accent">真的发生在 Mac 上</span></h2><p>动作可配置、可校验、可追踪，不把权限交给云端。</p></div>
+                    <div class="action-flow reveal">
+                        <div class="action-card"><span class="n">01 / INPUT</span><h3>用户说</h3><p>“打开微信”</p></div><div class="action-card"><span class="n">02 / UNDERSTAND</span><h3>识别意图</h3><p>模型判断这是工具调用</p></div><div class="action-card"><span class="n">03 / MATCH</span><h3>找到映射</h3><p>命中已启用的微信.app</p></div><div class="action-card"><span class="n">04 / VERIFY</span><h3>客户端校验</h3><p>白名单 + 参数检查</p></div><div class="action-card"><span class="n">05 / EXECUTE</span><h3>macOS 执行</h3><p>打开应用并回传结果</p></div>
+                    </div>
+                    <div class="action-quote reveal"><strong>模型负责理解，客户端负责执行。</strong><span>SAFE BY DESIGN</span></div>
+                </div>
+                <!-- 演讲备注：打开应用不是写死在代码里，而是配置映射。模型没有任意系统权限，客户端只执行白名单动作。 -->
+            </section>
+
+            <!-- === SLIDE 8: FUNCTION CALLING === -->
+            <section class="slide" data-title="Function Calling">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">07 / FUNCTION CALLING</div><div class="page-no">07 / 12</div>
+                    <div class="section-head reveal"><h2>Function Calling 的<br><span class="accent">正确顺序</span></h2><p>不要被“输入 / 输出”标签带偏，先记住业务顺序。</p></div>
+                    <div class="function-layout">
+                        <div class="timeline reveal"><div class="timeline-item"><div class="timeline-num">01</div><div><h3>客户端告诉豆包：我有哪些工具</h3><p>把已启用的动作注册进会话</p></div></div><div class="timeline-item"><div class="timeline-num">02</div><div><h3>用户说：打开微信</h3><p>实时语音会话持续进行</p></div></div><div class="timeline-item"><div class="timeline-num">03</div><div><h3>豆包下发 function_call</h3><p>请求调用“打开微信”</p></div></div><div class="timeline-item"><div class="timeline-num">04</div><div><h3>客户端执行并回传结果</h3><p>成功或失败都作为 tool 消息返回</p></div></div><div class="timeline-item"><div class="timeline-num">05</div><div><h3>豆包继续用语音回答</h3><p>模型知道动作已经完成</p></div></div></div>
+                        <div class="callout reveal"><span class="panel-label">DEBUG NOTE / VOLCENGINE</span><h3>服务端先发要求，<br>客户端执行后回传。</h3><p>如果方向理解反了，客户端和模型会互相等待：没有打开应用，也没有回答。</p><div class="code-line">server → function_call_arguments.done<br>client → conversation.item.create / role=tool</div></div>
+                    </div>
+                </div>
+                <!-- 演讲备注：联调时最容易站错视角。真正要记住的是：模型要求客户端调用工具，客户端执行后再把结果作为 tool 消息传回。 -->
+            </section>
+
+            <!-- === SLIDE 9: DEBUGGING === -->
+            <section class="slide" data-title="问题定位">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">08 / WHEN IT BREAKS</div><div class="page-no">08 / 12</div>
+                    <div class="section-head reveal"><h2>“刚才还可以”，<br><span class="accent">为什么聊一会儿就失灵</span></h2><p>不是一个 Bug，是多层链路同时出问题。</p></div>
+                    <div class="debug-grid">
+                        <div class="symptom-stack reveal"><div class="symptom"><i></i>模型说“没有可用工具”</div><div class="symptom"><i></i>“剪映”“Codex”识别不准</div><div class="symptom"><i></i>听懂了，却只给文字回答</div><div class="symptom"><i></i>扬声器声音被麦克风收回去</div><div class="symptom"><i></i>重复工具消息导致动作重复</div></div>
+                        <div class="debug-visual reveal"><h3>把玄学变成可定位的链路</h3><p>在每一个关键节点记录证据。</p><div class="log-lines"><div class="log-line"><b>SESSION</b><span>tools_loaded = 3</span></div><div class="log-line"><b>ASR</b><span>text = “打开微信”</span></div><div class="log-line"><b>MODEL</b><span>function_call = open_app</span></div><div class="log-line"><b>CLIENT</b><span>matched = WeChat.app</span></div><div class="log-line warn"><b>AUDIO</b><span>echo_detected = true</span></div><div class="log-line"><b>RESULT</b><span>tool_result = success</span></div></div><span class="debug-caption">LOG FIRST · GUESS LAST</span></div>
+                    </div>
+                </div>
+                <!-- 演讲备注：看到没有打开微信，不要先认定执行代码坏了。可能是没听清、没选工具、执行失败或回声干扰。日志让问题可以逐段定位。 -->
+            </section>
+
+            <!-- === SLIDE 10: STABILIZATION === -->
+            <section class="slide" data-title="稳定性">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">09 / MAKE IT RELIABLE</div><div class="page-no">09 / 12</div>
+                    <div class="section-head reveal"><h2>不是所有事情，<br><span class="accent">都要交给大模型</span></h2><p>确定的事情走确定路线，复杂的事情才交给模型。</p></div>
+                    <div class="two-routes reveal"><div class="route direct"><span class="route-tag">DIRECT ROUTE</span><h3>明确、无参数命令</h3><p>客户端识别后直接执行，快、稳、可预期。</p><ul><li>打开微信</li><li>打开剪映</li><li>打开 Codex</li><li>严格匹配完整命令</li></ul></div><div class="route ai"><span class="route-tag">MODEL ROUTE</span><h3>需要理解上下文的命令</h3><p>继续交给 Function Calling，模型负责选择工具和生成参数。</p><ul><li>把选中的文字改得更正式</li><li>翻译成英文</li><li>快捷键 / 复制粘贴</li><li>复杂内容编辑</li></ul></div></div>
+                    <div class="stability-foot reveal"><b>配套增强：</b><span>应用名热词 · 受限模糊匹配 · 回声剥离 · 调用去重 · 本地执行后取消普通回答</span></div>
+                </div>
+                <!-- 演讲备注：打开微信没有参数，也没有创造空间；客户端直做更稳。需要理解上下文、生成参数的任务，才交给模型。 -->
+            </section>
+
+            <!-- === SLIDE 11: RESPONSIBILITY === -->
+            <section class="slide" data-title="责任边界">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">10 / CLEAR BOUNDARIES</div><div class="page-no">10 / 12</div>
+                    <div class="section-head reveal"><h2>客户端、固件、云端，<br><span class="accent">分别负责什么</span></h2><p>边界越清楚，系统越容易扩展，也越安全。</p></div>
+                    <div class="responsibility reveal"><div class="role"><small>ROLE 01</small><h3>固件</h3><dl><div><dt>负责</dt><dd>通话触发、采集麦克风、播放扬声器、保持音频连接</dd></div><div><dt>不负责</dt><dd>不认识微信，不执行 Function Calling</dd></div></dl></div><div class="role"><small>ROLE 02</small><h3>Mac 客户端</h3><dl><div><dt>负责</dt><dd>保存映射、连接云端、执行本机动作、记录日志</dd></div><div><dt>不负责</dt><dd>不代替模型理解复杂语言</dd></div></dl></div><div class="role"><small>ROLE 03</small><h3>豆包实时语音</h3><dl><div><dt>负责</dt><dd>识别、对话、生成语音、复杂工具选择</dd></div><div><dt>不负责</dt><dd>不直接控制用户电脑</dd></div></dl></div></div>
+                    <div class="aec reveal"><strong>下一步：</strong> AEC 回声消除 + 稳定的全双工音频。文字过滤只是补救，理想解法仍在音频前端。</div>
+                </div>
+                <!-- 演讲备注：微信路径、快捷键和 API Key 不需要写进固件。固件做好收音和放音，电脑应用配置留在 Mac 上。 -->
+            </section>
+
+            <!-- === SLIDE 12: LESSONS === -->
+            <section class="slide" data-title="最大经验">
+                <div class="slide-inner">
+                    <div class="eyebrow reveal">11 / TAKEAWAYS</div><div class="page-no">11 / 12</div>
+                    <div class="section-head reveal"><h2>从“用不了”，到<br><span class="accent">“真的做出来了”</span></h2><p>这次最有价值的，不只是一个客户端，而是一套可复用的人机协作方法。</p></div>
+                    <div class="lessons-layout"><div class="lesson-hero reveal">人负责<br><span>大的方向</span>，<br>具体工作交给 AI。</div><div class="lesson-list reveal"><div class="lesson"><span class="lesson-num">01</span><div><h3>先拆成能验证的链路</h3><p>把大问题拆成声音、会话、工具、执行四段。</p></div></div><div class="lesson"><span class="lesson-num">02</span><div><h3>不稳定时先补日志</h3><p>让“玄学”变成可以逐段定位的证据。</p></div></div><div class="lesson"><span class="lesson-num">03</span><div><h3>规则与模型各司其职</h3><p>确定的事情用规则，复杂的事情再交给大模型。</p></div></div></div></div>
+                    <div class="closing reveal"><p>人决定为什么做、做到什么程度，并用真实设备验收结果。</p><strong>END / THANK YOU</strong></div>
+                </div>
+                <!-- 演讲备注：人不一定亲手写完每一行代码，但一定要知道解决什么问题、怎样算成功并愿意真实测试。AI 负责大量具体工作，人负责方向、判断和验收。 -->
+            </section>
+        </main>
+    </div>
+
+    <!-- === PRESENTATION UI === -->
+    <div class="progress-wrap" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div>
+    <div class="counter" id="counter" aria-live="polite">01 / 12</div>
+    <div class="edit-hotzone" id="editHotzone" aria-label="显示编辑按钮"></div>
+    <button class="edit-toggle" id="editToggle" title="编辑模式（E）">✎ 编辑</button>
+    <span class="edit-hint">编辑模式：点击文字修改 · Ctrl+S 保存</span>
+
+    <script>
+        /* === SLIDE PRESENTATION CONTROLLER === */
+        class SlidePresentation {
+            constructor() {
+                this.slides = [...document.querySelectorAll('.slide')];
+                this.currentSlide = 0;
+                this.stage = document.getElementById('deckStage');
+                this.progress = document.getElementById('progressBar');
+                this.counter = document.getElementById('counter');
+                this.setupStageScale();
+                this.setupKeyboardNav();
+                this.setupTouchNav();
+                this.setupWheelNav();
+                this.showSlide(0);
+            }
+            setupStageScale() {
+                const scale = () => {
+                    const factor = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+                    const x = (window.innerWidth - 1920 * factor) / 2;
+                    const y = (window.innerHeight - 1080 * factor) / 2;
+                    this.stage.style.transform = `translate(${x}px, ${y}px) scale(${factor})`;
+                };
+                scale();
+                window.addEventListener('resize', scale);
+            }
+            setupKeyboardNav() {
+                document.addEventListener('keydown', (event) => {
+                    if (event.target && event.target.getAttribute && event.target.getAttribute('contenteditable') === 'true') return;
+                    if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(event.key)) { event.preventDefault(); this.showSlide(this.currentSlide + 1); }
+                    if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(event.key)) { event.preventDefault(); this.showSlide(this.currentSlide - 1); }
+                    if (event.key === 'Home') this.showSlide(0);
+                    if (event.key === 'End') this.showSlide(this.slides.length - 1);
+                });
+            }
+            setupTouchNav() {
+                let startX = 0;
+                document.addEventListener('touchstart', (e) => { startX = e.changedTouches[0].screenX; }, { passive: true });
+                document.addEventListener('touchend', (e) => { const delta = e.changedTouches[0].screenX - startX; if (Math.abs(delta) > 50) this.showSlide(this.currentSlide + (delta < 0 ? 1 : -1)); }, { passive: true });
+            }
+            setupWheelNav() {
+                let lock = false;
+                document.addEventListener('wheel', (e) => {
+                    if (lock || Math.abs(e.deltaY) < 18) return;
+                    lock = true; this.showSlide(this.currentSlide + (e.deltaY > 0 ? 1 : -1));
+                    setTimeout(() => { lock = false; }, 650);
+                }, { passive: true });
+            }
+            showSlide(index) {
+                this.currentSlide = Math.max(0, Math.min(index, this.slides.length - 1));
+                this.slides.forEach((slide, i) => { slide.classList.toggle('active', i === this.currentSlide); slide.classList.toggle('visible', i === this.currentSlide); });
+                const pct = (this.currentSlide / (this.slides.length - 1)) * 100;
+                this.progress.style.width = `${pct}%`;
+                this.counter.textContent = `${String(this.currentSlide + 1).padStart(2, '0')} / ${String(this.slides.length).padStart(2, '0')}`;
+                history.replaceState(null, '', `#${this.currentSlide + 1}`);
+            }
+        }
+
+        /* === INLINE EDITOR === */
+        class InlineEditor {
+            constructor() {
+                this.isActive = false;
+                this.toggle = document.getElementById('editToggle');
+                this.hotzone = document.getElementById('editHotzone');
+                this.hideTimeout = null;
+                this.bind();
+            }
+            bind() {
+                this.toggle.addEventListener('click', () => this.toggleEditMode());
+                this.hotzone.addEventListener('click', () => this.toggleEditMode());
+                this.hotzone.addEventListener('mouseenter', () => { clearTimeout(this.hideTimeout); this.toggle.classList.add('show'); });
+                this.hotzone.addEventListener('mouseleave', () => this.deferHide());
+                this.toggle.addEventListener('mouseenter', () => clearTimeout(this.hideTimeout));
+                this.toggle.addEventListener('mouseleave', () => this.deferHide());
+                document.addEventListener('keydown', (event) => {
+                    if ((event.key === 'e' || event.key === 'E') && !(event.target && event.target.getAttribute && event.target.getAttribute('contenteditable') === 'true')) this.toggleEditMode();
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && this.isActive) { event.preventDefault(); this.save(); }
+                });
+            }
+            deferHide() { this.hideTimeout = setTimeout(() => { if (!this.isActive) this.toggle.classList.remove('show'); }, 400); }
+            toggleEditMode() {
+                this.isActive = !this.isActive;
+                document.body.classList.toggle('editing', this.isActive);
+                this.toggle.classList.toggle('active', this.isActive);
+                this.toggle.textContent = this.isActive ? '✓ 完成' : '✎ 编辑';
+                document.querySelectorAll('[data-editable="true"]').forEach(el => { el.contentEditable = this.isActive ? 'true' : 'false'; });
+            }
+            save() {
+                const editable = [...document.querySelectorAll('[data-editable="true"]')].map(el => el.innerHTML);
+                localStorage.setItem('easyinput-deck-edits', JSON.stringify(editable));
+                const exportHtml = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                const blob = new Blob([exportHtml], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'EasyInput项目复盘分享-edited.html';
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                this.toggle.textContent = '✓ 已保存并下载';
+                setTimeout(() => { if (this.isActive) this.toggle.textContent = '✓ 完成'; }, 1200);
+            }
+            restore() {
+                try { const saved = JSON.parse(localStorage.getItem('easyinput-deck-edits') || 'null'); if (Array.isArray(saved)) document.querySelectorAll('[data-editable="true"]').forEach((el, i) => { if (saved[i]) el.innerHTML = saved[i]; }); } catch (_) { /* ignore malformed local edits */ }
+            }
+        }
+
+        /* === BOOT === */
+        const presentation = new SlidePresentation();
+        const editor = new InlineEditor();
+        editor.restore();
+        const initial = Number(location.hash.slice(1));
+        if (Number.isInteger(initial) && initial > 0) presentation.showSlide(initial - 1);
+    </script>
+</body>
+</html>

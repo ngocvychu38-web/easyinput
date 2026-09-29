@@ -6,7 +6,7 @@
 >
 > 基线提交：`908eb01fb4505aea56637d51c06ea46727843d3f`
 >
-> 现场核对日期：2026-08-29（Asia/Shanghai）
+> 现场核对日期：2026-08-30（Asia/Shanghai）
 > 项目根目录：`/Users/macforai/Documents/ChatGPT/easyinput`
 
 ## 1. 文档结论
@@ -28,13 +28,14 @@
 
 ### 2.1 已有业务功能
 
-当前 React 应用提供 10 个业务入口：
+当前 React 应用提供 11 个业务入口：
 
 | 页面 | 业务作用 | 主要源码 |
 |---|---|---|
 | 概览 | 当日字数、时长、活动趋势和设备/服务状态 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/OverviewPage.tsx` |
 | 语音 | 电脑麦克风实时转写、开发板按键触发、语音编辑 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/VoicePage.tsx` |
 | 通话 | 开发板麦克风 → 豆包实时语音 → 开发板扬声器 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/RealtimeCallPage.tsx` |
+| 语音调用 | 配置由豆包实时语音触发的本机应用、快捷键、固定文字和选区编辑动作 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/VoiceActionsPage.tsx` |
 | 历史 | 转写结果分页、日历统计和删除 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/HistoryPage.tsx` |
 | 词库 | 热词、替换规则、文本导入导出 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/DictionaryPage.tsx` |
 | 键盘 | 8 键映射、旋钮、网络、音效、编程助手、固件信息 | `/Users/macforai/Documents/ChatGPT/easyinput/src/pages/KeyboardPage.tsx` |
@@ -53,6 +54,7 @@
 | 开发板语音键/编辑键 | 已实现协议和监听 | 需要实板做最终 I/O 验收 |
 | 普通语音输入的音源 | **当前是 Mac 麦克风** | 开发板按键只负责触发；`VoicePage.tsx` 始终调用 `getUserMedia` |
 | 实时通话的音源/播放 | 开发板麦克风和扬声器 | Rust 通过 UDP 接收 16 kHz PCM、发送 24 kHz PCM |
+| 实时语音动作路由 | 已实现 | 无参数明确命令本地直调；复杂参数走 Function Calling，并按 `call_id` 回传结果 |
 | USB 配置同步 | 已实现 | VID/PID、Feature Report 分片、CRC、保存 ACK 均已编码 |
 | BLE | 产品界面和连接状态模型存在 | 当前核心设备适配实际以 USB HID 为主，BLE 端到端仍需实板验证 |
 | 音效同步 | 未完成 | 当前命令明确返回“需连接真实键盘完成端到端验证” |
@@ -72,7 +74,7 @@ flowchart LR
     UI <-->|"Tauri invoke + event"| Rust
     MacMic["Mac 麦克风 / Web Audio"] --> UI
     Rust -->|"WSS ASR 2.0"| ASR["豆包语音识别"]
-    Rust <-->|"WSS 实时语音 3.0"| RT["豆包全双工实时语音"]
+    Rust <-->|"WSS 实时语音 3.0 + Function Calling"| RT["豆包全双工实时语音"]
     Rust -->|"HTTPS Responses API"| Ark["火山方舟文本模型"]
     Rust --> JSON["config.json / dictionary.json"]
     Rust --> SQLite["SQLite history.db"]
@@ -96,7 +98,7 @@ flowchart LR
 - 路径：`/Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src`
 - 应用启动和命令入口：`/Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src/lib.rs`
 - 业务数据模型：`/Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src/model.rs`
-- 主要职责：可信状态管理、配置校验、设备发现、云服务鉴权、历史写入、系统权限检查、文本注入、应用启动。
+- 主要职责：可信状态管理、配置校验、设备发现、云服务鉴权、历史写入、系统权限检查、文本注入、应用启动，以及实时语音工具调用的白名单匹配和本机执行。
 
 #### 设备适配层
 
@@ -489,6 +491,8 @@ byte 12..63 payload，最多 52 bytes
 
 ### 5.6 全双工实时语音
 
+通话页默认开启“唤醒词待命”，也可在通话开始前或通话过程中关闭。说“闭嘴吧”“请你休息一下”等休息表达会取消当前回答并暂停本地动作与 Function Calling；实时音频识别继续运行，仅用于等待“八弟八弟”及常见近音转写。单独说唤醒词只解除待命，不触发助手回复；后续任务会正常处理，若唤醒词后直接接任务则同一轮处理。宿主直接关闭直播、英语学习、驾驶舱等模块时也会取消同轮模型回答，避免云端对已完成的关闭操作给出相反回复。详见 [T10 任务卡](../flow/tasks/T10-realtime-wake-word.md)。
+
 ```mermaid
 sequenceDiagram
     participant B as 开发板
@@ -537,7 +541,24 @@ sequenceDiagram
 
 该方案选择 UDP 而不是把音频塞进 USB Feature Report，优势是吞吐高、延迟低、不会让 HID 控制通道承担连续媒体流；代价是必须处于可信局域网，并需要做好来源绑定、序列检查、超时和丢包诊断。
 
-### 5.7 历史、概览和词库
+### 5.7 语音调用与 Function Calling
+
+“语音调用”配置与键盘 8 键配置相互独立。每项由 UUID、启用状态、名称、语音说明和一个本机动作组成，保存在配置版本 5 的 `voice_actions` 字段中。客户端不限制列表数量；只有已启用项进入下一次实时通话的 `session.create.session.tools`，并建立本地指令索引。
+
+工具名采用 `voice_action_<去掉连字符的小写 UUID>`，避免中文名称、重名或用户修改标题导致工具身份漂移。普通动作使用空对象参数；选区语音编辑要求 `instruction` 字符串。收到 `response.function_call_arguments.done` 后，Rust 按工具名重新匹配当前会话快照中的启用映射，执行本机动作，并使用原始 `call_id` 回传 `conversation.item.create`。
+
+当前支持：打开 `.app`、自定义快捷键、复制、粘贴、剪切、全选、撤销、回车、退格、固定文字和选区语音编辑。前十类无需模型参数的动作会从 ASR 最终文本的明确命令子句中匹配后立即执行，并取消模型该轮可能产生的普通回答；拉丁应用名允许唯一候选下的受限编辑距离匹配。客户端还会从转写开头剥离与上一轮助手文字高度相似的扬声器回声，防止自问自答污染命令。选区语音编辑继续由 Function Calling 生成 `instruction`。一次服务端事件包含多个 Function Call 时，客户端并行执行并在一条结果事件中聚合；已经处理的 `call_id`，以及本轮已经由本地路由接管的动作，都不会重复执行。
+
+职责边界如下：
+
+- 客户端负责严格匹配明确本机命令；豆包负责未精确匹配或需要参数的自然语言意图，不直接取得本机执行权限。
+- Rust 只执行用户在设置页主动保存并启用的白名单动作；应用路径在保存和执行时双重校验。
+- 应用路径、快捷键、工具参数和 API Key 不写入固件。固件继续只负责通话触发及双向 PCM。
+- 映射变更在下一次实时通话生效，避免进行中的会话工具定义与本机配置不一致。
+
+完整的客户端事件、固件报文偏移、状态机和联调用例见 [语音调用：客户端与固件接口说明](语音调用-客户端与固件接口说明.md)。
+
+### 5.8 历史、概览和词库
 
 历史分页采用 `id < cursor ORDER BY id DESC LIMIT ?`，默认 20 条，限制在 1–100 条。相比 offset 分页，新增数据时不容易造成翻页重复或遗漏。
 
@@ -557,7 +578,7 @@ WHERE date(created_at, 'localtime') = date('now', 'localtime');
 
 JSON 配置写入采用 `*.tmp` + rename，避免应用崩溃时留下半个 JSON。配置版本高于客户端支持版本时进入保护模式，不自动覆盖未来版本的数据。
 
-### 5.8 浏览器预览与原生运行
+### 5.9 浏览器预览与原生运行
 
 `src/api.ts` 通过 `__TAURI_INTERNALS__` 判断是否运行在 Tauri：
 
@@ -579,6 +600,8 @@ JSON 配置写入采用 `*.tmp` + rename，避免应用崩溃时留下半个 JSO
 6. App 路径不下发设备，只下发 UUID。
 7. 账号 Schema 未知时安全失败，不猜测接口。
 8. 更新签名未配置时安全失败，不安装未知更新。
+9. 语音工具使用不可预测 UUID 生成稳定工具名，执行前仍按启用映射白名单匹配；重复 `call_id` 不会重复执行。
+10. Function Calling 只开放已实现的动作枚举，不允许模型拼接 shell 命令、任意 URL 或任意程序参数。
 
 ### 6.2 仍需处理的风险
 
@@ -690,7 +713,17 @@ npm run verify:intel
 
 验收标准：开发板扬声器无明显持续卡顿；错误包不进入云端；停止后 UDP、WSS 和状态都能清理。
 
-### 阶段五：补齐发布外部依赖
+### 阶段五：验收语音调用
+
+1. 配置打开 Safari、`Command+Shift+P`、复制和选区语音编辑四种动作，重新开始实时通话。
+2. 验证豆包只在用户明确要求时调用；容易混淆的自然说法通过名称和语音说明消歧。
+3. 验证一次返回多个调用时全部执行且保留各自 `call_id`，重复事件不造成二次副作用。
+4. 验证应用被移动、权限被拒绝、未选中文本、Ark 未配置和未知工具时，失败结果能回传并继续对话。
+5. 验证固件只收发实时通话控制和 PCM，不收到应用路径、快捷键、工具名或结果 JSON。
+
+验收标准：打开应用与快捷键在前台应用中准确执行；失败可解释、调用不重复、固件职责不扩张。
+
+### 阶段六：补齐发布外部依赖
 
 1. 获取正式账号 API Schema 和测试账号，再实现 login/logout。
 2. 获取 Developer ID Application、Notarization 配置。
@@ -728,7 +761,7 @@ npm run verify:intel
 
 ## 10. 当前结论和发布判定
 
-当前源码已经形成可工作的技术闭环：React UI → Tauri IPC → Rust 会话/协议 → 官方云服务 → 本地数据/系统输入；自动化测试和前端构建均通过。本机也已经产生真实历史、词库、键位和云服务配置数据，说明并非只有静态页面。
+当前源码已经形成可工作的技术闭环：React UI → Tauri IPC → Rust 会话/协议 → 官方云服务 → Function Calling 白名单动作 → 本地数据/系统输入；自动化测试和前端构建均通过。本机也已经产生真实历史、词库、键位和云服务配置数据，说明并非只有静态页面。
 
 但当前还不应直接判定为“生产发布完成”，原因是：
 
@@ -737,5 +770,6 @@ npm run verify:intel
 3. 音效同步、账号协议、签名更新和固件更新尚未完成。
 4. 现有 DMG 早于当前源码修改，必须重新打包、签名和验证。
 5. 工作区当前存在未提交修改，应先审查并形成明确提交，再生成发布候选包。
+6. 语音调用客户端逻辑已经完成自动化和浏览器交互验证，但仍需使用有效豆包实时语音账号与实板完成端到端工具调用、播报和长时通话验收。
 
 因此最合理的判断是：**技术路线正确，桌面端核心业务已实现；下一步重点不是更换架构，而是实板协议验收、普通语音音源语义收口、发布签名和外部接口补齐。**

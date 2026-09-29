@@ -1,0 +1,6 @@
+.cube-page { height: calc(100vh - 154px); min-height: 650px; display: flex; flex-direction: column; gap: 12px; }
+.cube-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 2px; }
+.cube-toolbar h1 { display: flex; align-items: center; gap: 9px; margin: 0 0 5px; font-size: 21px; }
+.cube-toolbar p { margin: 0; color: var(--muted, #8b95a3); font-size: 12px; }
+.cube-toolbar button { display: flex; align-items: center; gap: 7px; border: 1px solid var(--line, #343a45); border-radius: 8px; padding: 8px 12px; background: var(--panel, #171c24); color: inherit; cursor: pointer; }
+.cube-page iframe { flex: 1; width: 100%; min-height: 0; border: 1px solid #596676; border-radius: 12px; background: #303946; }

@@ -1,0 +1,97 @@
+{
+  "source": {
+    "platform": "Feishu Base",
+    "base_name": "🌈AI训练营",
+    "base_token": "Gh1QbQ8bOaD1MJsBsBOcBfR1nZd",
+    "workspace_token": "LOzDsQgFypSs6Xc4ZUIcrkEWnbe",
+    "source_url": "https://waytoagi.feishu.cn/app/Gh1QbQ8bOaD1MJsBsBOcBfR1nZd?pageId=pgeeyqdJjSlIe9iM",
+    "captured_at": "2026-09-04 16:53:09 CST",
+    "method": [
+      "lark-cli identity and Base metadata verification",
+      "lark-cli Drive title/content search",
+      "read-only capture of the Base application pages because the advanced Base exposed no tables through the current OpenAPI"
+    ],
+    "captured_at_iso": "2026-09-04T16:53:09+08:00"
+  },
+  "overview": {
+    "cohort_count": 7,
+    "enrollments_sum_across_cohorts": 27539,
+    "home_alumni_count": 11846,
+    "home_outstanding_alumni_count": 126,
+    "submission_count_sum_cohorts_1_to_5": 21587,
+    "notes": [
+      "Enrollment is a cohort enrollment count, not a deduplicated person count; repeat enrollment across cohorts may exist.",
+      "The alumni count equals enrollments in cohorts 1-4 numerically; this does not establish alumni cohort coverage, graduation status, deduplication, or cohort distribution.",
+      "Submission count is the number of assignment submissions, not the number of students who submitted; it can exceed enrollment.",
+      "Cohorts 6 and 7 display zero submissions together with empty/invalid charts, so zero should be treated as missing or not-yet-published data until verified.",
+      "Cohort 7 changed from 3521 to 3522 enrollments during collection, confirming that the source is live."
+    ]
+  },
+  "cohorts": [
+    {
+      "cohort": 1,
+      "name": "第一期n8n实战训练营",
+      "page_id": "pgeltdPlAKSE61CI",
+      "enrollments": 1058,
+      "assignment_submissions": 1402,
+      "submissions_per_enrollment": 1.3251417769376181,
+      "data_status": "available"
+    },
+    {
+      "cohort": 2,
+      "name": "第二期智能体实战训练营",
+      "page_id": "pgeMlhIUYkIYld3Z",
+      "enrollments": 3097,
+      "assignment_submissions": 5597,
+      "submissions_per_enrollment": 1.8072328059412335,
+      "data_status": "available"
+    },
+    {
+      "cohort": 3,
+      "name": "第三期AI短剧训练营",
+      "page_id": "pgeAv00YO0ht2gTl",
+      "enrollments": 3101,
+      "assignment_submissions": 3839,
+      "submissions_per_enrollment": 1.2379877458884232,
+      "data_status": "available"
+    },
+    {
+      "cohort": 4,
+      "name": "第四期Vibe Coding训练营",
+      "page_id": "pgesuixDHqytLdcN",
+      "enrollments": 4590,
+      "assignment_submissions": 4690,
+      "submissions_per_enrollment": 1.0217864923747277,
+      "data_status": "available"
+    },
+    {
+      "cohort": 5,
+      "name": "第五期OpenClaw训练营",
+      "page_id": "pgeJWOiDVcrH0O5j",
+      "enrollments": 8743,
+      "assignment_submissions": 6059,
+      "submissions_per_enrollment": 0.6930115520988219,
+      "data_status": "available"
+    },
+    {
+      "cohort": 6,
+      "name": "第六期IP影视创作训练营",
+      "page_id": "pgemJYKW2puKQWZ7",
+      "enrollments": 3428,
+      "assignment_submissions": null,
+      "submissions_per_enrollment": null,
+      "data_status": "submission_data_missing_or_unpublished",
+      "raw_assignment_submissions": 0
+    },
+    {
+      "cohort": 7,
+      "name": "第七期AI硬件训练营",
+      "page_id": "pgexbq8vagBCySvr",
+      "enrollments": 3522,
+      "assignment_submissions": null,
+      "submissions_per_enrollment": null,
+      "data_status": "submission_data_missing_or_unpublished",
+      "raw_assignment_submissions": 0
+    }
+  ]
+}

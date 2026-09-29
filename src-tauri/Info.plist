@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+  <key>NSCameraUsageDescription</key><string>EasyInput 直播工作室需要摄像头进行视频预览与直播。</string>
   <key>NSMicrophoneUsageDescription</key><string>EasyInput 需要麦克风权限来完成语音输入。</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>EasyInput 需要蓝牙权限来连接 EasyInput AI 键盘。</string>
   <key>NSLocalNetworkUsageDescription</key><string>EasyInput 需要本地网络权限来接收开发板麦克风音频。</string>

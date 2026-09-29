@@ -1,0 +1,25 @@
+采访结论
+
+用户将参加 WaytoAGI 第七期 AI 训练营内部分享，主题是 EasyInput 项目的真实开发经历。分享不需要做成正式商业汇报，而是希望用第一人称、大白话讲清楚：为什么动手、项目怎么工作、实时语音怎么实现、语音如何调用第三方应用、过程中踩了哪些坑，以及怎样与 AI 协作完成项目。
+
+用户授权由 AI 根据“内部简单分享”场景决定页数、密度、风格和资料范围。当前阶段先交付 Markdown 内容，后续再制作 HTML Slide。
+
+canonical:
+scenario: WaytoAGI 第七期 AI 训练营内部项目经验分享
+audience: 对 AI 应用开发感兴趣、技术背景不完全一致的训练营学员
+target_action: 让学员听懂项目实现过程，并获得一套可以照着实践的人机协作方法
+expected_pages: 约 12 页，适配 15 分钟左右分享
+page_density: 均衡图文，故事页简洁，技术流程页适度增加信息量
+style: 轻量科技感，真实、克制、偏个人项目复盘
+brand: 延续 EasyInput 简洁界面气质；不强制使用训练营品牌资产
+must_include: Intel Mac 起因、业务与技术架构、实时语音全链路、端到端方案选择、打断机制、Function Calling、本地确定性路由、第三方应用调用、火山引擎文档踩坑、语音回声与稳定性排查、人负责方向而 AI 负责具体工作的协作经验
+must_avoid: 不夸大为完全自主开发；不把 AI 描述成无需人验收；不堆砌协议字段和代码；不虚构性能数据和用户规模
+language: 中文，大白话，第一人称演讲口吻
+imagery: 以真实项目界面、架构流程图和少量装饰图形为主
+material_strategy: local_only
+subagent_model_strategy: 继承主代理
+subagent_thinking_effort: 中等
+manual_audit_mode: milestone_only
+manual_audit_scope: Markdown 内容与最终 HTML 图审
+manual_audit_assets: summary_only
+density_bias: balanced

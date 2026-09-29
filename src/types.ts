@@ -7,6 +7,8 @@ export interface DeviceCapabilities { config: boolean; microphone: boolean; spea
 export interface AudioStreamDiagnostics { packets: number; bytes: number; sequenceGaps: number; outOfOrder: number; rms: number; peak: number; lastHeartbeatAt?: string; lastError?: string }
 export type KeyboardActionKind = "VoicePtt" | "EditPtt" | "RealtimeVoice" | "Enter" | "Backspace" | "Cut" | "SelectAll" | "Copy" | "Paste" | "Undo" | "Hotkey" | "FixedText" | "OpenApp" | "ScrollAxisToggle" | "CaretSelect" | "Disabled" | "HostAction";
 export interface KeyboardAction { kind: KeyboardActionKind; label: string; value?: string; hostActionId?: string }
+export interface VoiceActionMapping { id: string; enabled: boolean; name: string; description: string; action: KeyboardAction }
+export interface VoiceActionsConfig { revision: number; mappings: VoiceActionMapping[] }
 export interface InstalledApplication { name: string; path: string }
 export interface WifiNetwork { ssid: string; current: boolean; remembered: boolean; configured: boolean }
 export interface WifiScanResult {
@@ -39,9 +41,15 @@ export interface RealtimeVoiceConfig {
 }
 export type RealtimeCallPhase = "Idle" | "Connecting" | "Listening" | "Speaking" | "Closing" | "Error";
 export interface RealtimeCallState {
+  learningOwner?: string;
+  wakeWordEnabled?: boolean; wakeWordArmed?: boolean;
   phase: RealtimeCallPhase; sessionId?: string; userText: string; assistantText: string; elapsedMs: number;
-  inputPackets: number; outputPackets: number; error?: string; logId?: string;
+  inputPackets: number; outputPackets: number; toolCallCount: number; lastToolStatus?: string; error?: string; logId?: string;
 }
+export interface RealtimeDiagnosticsInfo { path: string; bytes: number }
+export interface PaymentMvpLaunch { pageUrl: string; paymentHost: string; expiresAt: string; looksLikeMcdDomain: boolean }
+export interface McdMcpConfig { enabled: boolean; endpoint: string; protocolVersion: string; tokenSaved: boolean }
+export interface McdMcpConnectionTest { latencyMs: number; serverName: string; protocolVersion: string; tools: string[] }
 export interface RealtimeConnectionTest { latencyMs: number; endpoint: string; model: string; logId?: string }
 export interface DoubaoConnectionTest { latencyMs: number; endpoint: string; resourceId: string; logId?: string }
 export interface SpeechTranscriptEvent { sessionId: string; text: string; definite: boolean; sequence?: number }
@@ -73,3 +81,5 @@ export const DEFAULT_REALTIME_CONFIG: RealtimeVoiceConfig = {
   instructions: "你是一个友好、简洁的中文语音助手。优先直接回答用户问题。", voice: "zh_male_xiaotian_jupiter_bigtts",
   speed: 0, loudness: 0, strictAudit: true, enableLoudnessNorm: true, enableUserQueryExit: false, greeting: "", apiKeySaved: false
 };
+export const DEFAULT_VOICE_ACTIONS_CONFIG: VoiceActionsConfig = { revision: 1, mappings: [] };
+export const DEFAULT_MCD_MCP_CONFIG: McdMcpConfig = { enabled: false, endpoint: "https://mcp.mcd.cn", protocolVersion: "2025-06-18", tokenSaved: false };

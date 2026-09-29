@@ -1,0 +1,23 @@
+本次内容只允许基于以下本地资料和源码提炼，不联网扩写：
+
+1. /Users/macforai/Documents/ChatGPT/easyinput/README.md
+2. /Users/macforai/Documents/ChatGPT/easyinput/docs/EasyInput-业务功能技术实现方案.md
+3. /Users/macforai/Documents/ChatGPT/easyinput/docs/语音调用-客户端与固件接口说明.md
+4. /Users/macforai/Documents/ChatGPT/easyinput/docs/IMPLEMENTATION_STATUS.md
+5. /Users/macforai/Documents/ChatGPT/easyinput/docs/EasyInput-从零搭建到使用-小白手把手教程.md
+6. /Users/macforai/Documents/ChatGPT/easyinput/src/App.tsx
+7. /Users/macforai/Documents/ChatGPT/easyinput/src/pages/RealtimeCallPage.tsx
+8. /Users/macforai/Documents/ChatGPT/easyinput/src/pages/VoiceActionsPage.tsx
+9. /Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src/realtime.rs
+10. /Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src/protocol/audio.rs
+11. /Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src/model.rs
+12. /Users/macforai/Documents/ChatGPT/easyinput/src-tauri/src/lib.rs
+
+用户提供的真实经历也属于一手资料：
+
+- 起因是现有客户端不支持 Intel Mac。
+- 先做出兼容客户端，再实现实时语音和语音调用。
+- 微信、剪映、Codex 等应用曾出现“刚开始能打开，聊久后失效”“没有配置工具”“说完没有回应”等不稳定情况。
+- 通过会话级日志、ASR 文本、本地执行日志、Function Call 日志定位问题，并增加本地确定性路由、回声剥离、模型回复取消、受限模糊匹配和去重。
+- 火山引擎 Function Calling 文档的输入/输出示例容易让客户端上下行理解反；正确业务顺序是服务端下发 function_call，客户端执行，再以 role=tool 回传结果。
+- 核心经验是：人确定方向、边界与验收标准，AI 承担资料阅读、编码、测试和排查，人再用真实设备验证并反馈。
